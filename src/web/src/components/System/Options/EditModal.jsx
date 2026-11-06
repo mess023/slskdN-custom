@@ -12,8 +12,14 @@ import CodeEditor from '../../Shared/CodeEditor';
 import React, { useEffect, useRef, useState } from 'react';
 import { Button, Icon, Message, Modal, Popup } from 'semantic-ui-react';
 
-const getErrorText = (error) =>
-  getApiErrorMessage(error, { t: interfaceText });
+// The YAML endpoints answer with a plain-text reason ("Invalid YAML configuration: ...").
+// Show that text as-is; fall back to the generic message for anything else.
+const getErrorText = (error) => {
+  const data = error?.response?.data;
+  return typeof data === 'string' && data.trim()
+    ? data
+    : getApiErrorMessage(error, { t: interfaceText });
+};
 
 const EditModal = ({ onClose, open, theme }) => {
   useInterfaceLanguage();

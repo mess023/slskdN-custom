@@ -57,7 +57,28 @@ describe('EditModal', () => {
       });
     });
     expect(updateYaml).not.toHaveBeenCalled();
-    expect(await screen.findByText(/The request failed\. Try again\./)).toBeInTheDocument();
+    expect(await screen.findByText('invalid yaml')).toBeInTheDocument();
+  });
+
+  it('shows the server reason when saving is rejected', async () => {
+    updateYaml.mockRejectedValue({
+      response: { data: "Invalid YAML configuration: Property 'blacklisted' not found", status: 400 },
+    });
+
+    render(
+      <EditModal
+        onClose={vi.fn()}
+        open
+        theme="dark"
+      />,
+    );
+
+    fireEvent.change(await screen.findByLabelText('Options YAML'), {
+      target: { value: 'global:\n  download:\n    blacklisted: []\n' },
+    });
+    fireEvent.click(screen.getByText('Save'));
+
+    expect(await screen.findByText(/Property 'blacklisted' not found/)).toBeInTheDocument();
   });
 
   it('saves when the validation endpoint answers with an empty 200 body', async () => {

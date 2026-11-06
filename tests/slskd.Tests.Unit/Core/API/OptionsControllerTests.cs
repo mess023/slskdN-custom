@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -165,6 +166,26 @@ public class OptionsControllerTests
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.DoesNotContain("1024", ok.Value?.ToString() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("Invalid YAML configuration", ok.Value);
+    }
+
+    [Fact]
+    public void ValidateYamlFile_WithInvalidOptions_IncludesDetailForAdministrators()
+    {
+        var controller = CreateController();
+        var identity = new System.Security.Claims.ClaimsIdentity(
+            new[] { new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, AuthRole.AdministratorOnly) },
+            "Test");
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(identity) },
+        };
+
+        var result = controller.ValidateYamlFile("soulseek:\n  listen_port: 1");
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var text = Assert.IsType<string>(ok.Value);
+        Assert.StartsWith("Invalid YAML configuration: ", text);
+        Assert.Contains("1024", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -257,9 +257,11 @@ namespace slskd.Core.API
                 return StatusCode(413, "YAML is too large");
             }
 
-            if (!TryValidateYaml(yaml, out var error))
+            if (!TryValidateYaml(yaml, out var error, out var detail))
             {
-                return Ok(error);
+                // Administrators may edit the file and need the specific reason; everyone else keeps the generic text.
+                var isAdministrator = User?.IsInRole(AuthRole.AdministratorOnly) == true;
+                return Ok(isAdministrator && !string.IsNullOrWhiteSpace(detail) ? $"{error}: {detail}" : error);
             }
 
             return Ok();
