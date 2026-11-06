@@ -57,11 +57,14 @@ const EditModal = ({ onClose, open, theme }) => {
     try {
       const response = await validateYaml({ yaml: newYaml });
       if (requestId !== validationRequestId.current) return undefined;
-      const error = typeof response === 'string'
+      // The server answers a valid file with an empty 200 body, which axios
+      // surfaces as '' (a string). Only a non-empty response is an error.
+      const hasError = typeof response === 'string'
+        ? response.trim().length > 0
+        : Boolean(response);
+      const error = hasError
         ? getErrorText({ response: { data: response } })
-        : response
-          ? getErrorText({ response: { data: response } })
-          : undefined;
+        : undefined;
       setYamlError(error);
       return error;
     } catch (error) {

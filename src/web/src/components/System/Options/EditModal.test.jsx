@@ -60,6 +60,30 @@ describe('EditModal', () => {
     expect(await screen.findByText(/The request failed\. Try again\./)).toBeInTheDocument();
   });
 
+  it('saves when the validation endpoint answers with an empty 200 body', async () => {
+    validateYaml.mockResolvedValue('');
+
+    render(
+      <EditModal
+        onClose={vi.fn()}
+        open
+        theme="dark"
+      />,
+    );
+
+    fireEvent.change(await screen.findByLabelText('Options YAML'), {
+      target: { value: 'remote_configuration: true\ndebug: true\n' },
+    });
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => {
+      expect(updateYaml).toHaveBeenCalledWith({
+        yaml: 'remote_configuration: true\ndebug: true\n',
+      });
+    });
+    expect(screen.queryByText(/The request failed\. Try again\./)).not.toBeInTheDocument();
+  });
+
   it('renders structured update errors as stable text', async () => {
     updateYaml.mockRejectedValue({
       response: {
