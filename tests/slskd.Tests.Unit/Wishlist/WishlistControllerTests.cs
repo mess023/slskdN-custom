@@ -1006,6 +1006,91 @@ public class WishlistControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task RunSearch_AppliesGlobalWishlistFilterAndMaxDownloads()
+    {
+        // wishlist.filter / wishlist.max_downloads apply to every item, whatever source created it:
+        // an unfiltered, unlimited item must still get exactly one .flac and never the cover art.
+        var itemId = Guid.NewGuid();
+        await using (var context = _contextFactory.CreateDbContext())
+        {
+            context.WishlistItems.Add(new WishlistItem
+            {
+                Id = itemId,
+                SearchText = "artist title",
+                Filter = string.Empty,
+                AutoDownload = true,
+                Enabled = true,
+            });
+            await context.SaveChangesAsync();
+        }
+
+        var searchService = CreateCompletedSearchService(itemId, new List<Response>
+        {
+            new()
+            {
+                Username = "alice",
+                HasFreeUploadSlot = true,
+                QueueLength = 0,
+                UploadSpeed = 1000,
+                Files =
+                [
+                    new slskd.Search.File { Filename = @"Music\Artist Title [FLAC]\cover.jpg", Size = 50 },
+                    new slskd.Search.File { Filename = @"Music\Artist Title [FLAC]\01 Song.flac", Size = 100 },
+                    new slskd.Search.File { Filename = @"Music\Artist Title [FLAC]\02 Song.flac", Size = 200 },
+                ],
+            },
+        });
+        var rankingService = new Mock<ISourceRankingService>();
+        rankingService
+            .Setup(service => service.RankSourcesAsync(It.IsAny<IEnumerable<SourceCandidate>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<SourceCandidate> candidates, CancellationToken cancellationToken) =>
+                candidates.Select(candidate => new RankedSource
+                {
+                    Username = candidate.Username,
+                    Filename = candidate.Filename,
+                    Size = candidate.Size,
+                    SmartScore = 10,
+                }));
+        List<slskd.Transfers.Downloads.DownloadEnqueueRequest>? enqueued = null;
+        var downloadService = new Mock<IDownloadService>();
+        downloadService
+            .Setup(service => service.EnqueueAsync(
+                It.IsAny<string>(),
+                It.IsAny<IEnumerable<slskd.Transfers.Downloads.DownloadEnqueueRequest>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback((string username, IEnumerable<slskd.Transfers.Downloads.DownloadEnqueueRequest> requests, CancellationToken cancellationToken) => enqueued = requests.ToList())
+            .ReturnsAsync((
+                new List<slskd.Transfers.Transfer>
+                {
+                    new() { Id = Guid.NewGuid(), Username = "alice", Filename = @"Music\Artist Title [FLAC]\02 Song.flac" },
+                },
+                new List<string>()));
+        var options = new slskd.Options
+        {
+            Wishlist = new slskd.Options.WishlistOptions { Filter = ".flac", MaxDownloads = 1 },
+        };
+        var service = new WishlistService(
+            _contextFactory,
+            Mock.Of<IDbContextFactory<slskd.Transfers.TransfersDbContext>>(),
+            searchService.Object,
+            Mock.Of<ISoulseekClient>(),
+            new TestOptionsMonitor<slskd.Options>(options),
+            rankingService.Object,
+            downloadService.Object);
+
+        await service.RunSearchAsync(itemId);
+
+        var request = Assert.Single(enqueued!);
+        Assert.EndsWith(".flac", request.Filename, StringComparison.OrdinalIgnoreCase);
+        await using var verifyContext = _contextFactory.CreateDbContext();
+        var item = await verifyContext.WishlistItems.FindAsync(itemId);
+        Assert.NotNull(item);
+        Assert.False(item.Enabled);
+        Assert.Equal(1, item.TotalDownloadCount);
+        Assert.Equal(1, item.LastFilteredOutHitCount);
+    }
+
+    [Fact]
     public async Task RunSearch_WhenAutoDownloadLimitIsOne_EnqueuesOnlyOneFile()
     {
         var itemId = Guid.NewGuid();

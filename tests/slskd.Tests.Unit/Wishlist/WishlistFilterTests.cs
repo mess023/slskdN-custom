@@ -16,6 +16,18 @@ public class WishlistFilterTests
         Assert.Equal(expected, WishlistService.CreateSearchFileFilter(filter)(filename));
     }
 
+    [Theory]
+    [InlineData(".flac", "Music/Album [FLAC]/01.flac", true)]
+    [InlineData(".flac", "Music/Album [FLAC]/cover.jpg", false)]
+    [InlineData(".flac OR .wav", "Music/Album [FLAC]/02.wav", true)]
+    [InlineData(".flac OR .wav", "Music/Album/wav/01.mp3", false)]
+    [InlineData("flac", "Music/Album [FLAC]/cover.jpg", true)]
+    [InlineData("flac -.jpg", "Music/Album [FLAC]/cover.jpg", false)]
+    public void Dotted_filter_terms_match_the_extension_only(string filter, string filename, bool expected)
+    {
+        Assert.Equal(expected, WishlistService.CreateSearchFileFilter(filter)(filename));
+    }
+
     [Fact]
     public void Ignore_rule_matches_only_the_same_peer_and_normalized_directory()
     {

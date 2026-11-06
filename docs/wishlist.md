@@ -94,6 +94,24 @@ This form is different from `mp3 OR aac minbr:256`: the first branch has no
 bitrate floor, while the second branch does. A global exclusion applies to
 every branch, for example `flac minbr:800 OR mp3 minbr:320 -demo`.
 
+A bare term such as `flac` matches anywhere in the path, so `cover.jpg` inside an
+`Album [FLAC]` folder passes. Prefix the term with a dot to match the file
+extension only: `.flac OR .wav` accepts `01.flac` and `02.wav` and rejects the
+cover art.
+
+### Instance-wide filter and download limit
+
+Two options apply to every wishlist item on top of its own settings, whatever
+created it (the UI, the API, Lidarr, a browser extension):
+
+```yaml
+wishlist:
+  filter: ".flac OR .wav OR .alac OR .aiff OR .aif OR .m4a" # AND-ed with each item's own filter
+  max_downloads: 1 # one file per item, never a whole folder; empty = the item decides
+```
+
+Environment variables: `WISHLIST_FILTER`, `WISHLIST_MAX_DOWNLOADS`.
+
 `minbr:<kbps>` (also accepted as `minbitrate:<kbps>`) checks the bitrate
 reported in search-result metadata. A value of `minbr:320` rejects a 128-kbps
 MP3 even when its filename has the right extension. A missing bitrate never

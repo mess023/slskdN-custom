@@ -141,6 +141,11 @@ namespace slskd.Wishlist
         private ISearchService SearchService { get; }
         private ISoulseekClient Client { get; }
         private IOptionsMonitor<slskd.Options> OptionsMonitor { get; }
+
+        // Instance-wide wishlist policy (wishlist.filter / wishlist.max_downloads) applied on top of each item's own settings.
+        private string GlobalFilter => OptionsMonitor.CurrentValue.Wishlist.Filter ?? string.Empty;
+
+        private int GlobalMaxDownloads => OptionsMonitor.CurrentValue.Wishlist.MaxDownloads ?? int.MaxValue;
         private ISourceRankingService RankingService { get; }
         private IDownloadService DownloadService { get; }
         private IUserBlockService? UserBlockService { get; }
@@ -808,7 +813,9 @@ namespace slskd.Wishlist
             var query = new SearchQuery(item.SearchText);
             var scope = SearchScope.Network;
 
-            var userFileFilter = CreateFileFilter(item.Filter);
+            var itemFileFilter = CreateFileFilter(item.Filter);
+            var globalSoulseekFileFilter = CreateFileFilter(GlobalFilter);
+            Func<Soulseek.File, bool> userFileFilter = file => itemFileFilter(file) && globalSoulseekFileFilter(file);
             var wishlistFileFilter = WishlistSearchPolicy.CreateSoulseekFileFilter(
                 item.SearchText,
                 userFileFilter);
@@ -854,7 +861,8 @@ namespace slskd.Wishlist
                 item.SearchText,
                 item.Filter,
                 ignoredResults,
-                blockedUsers);
+                blockedUsers,
+                GlobalFilter);
 
             // Update wishlist item stats
             item.LastSearchedAt = DateTime.UtcNow;
@@ -946,17 +954,21 @@ namespace slskd.Wishlist
             {
                 var wishlistItemId = item.Id;
                 var filter = item.Filter;
-                var remainingDownloads = item.MaxDownloads.HasValue
-                    ? item.MaxDownloads.Value - item.TotalDownloadCount
-                    : int.MaxValue;
+                var remainingDownloads = Math.Min(
+                    item.MaxDownloads.HasValue
+                        ? item.MaxDownloads.Value - item.TotalDownloadCount
+                        : int.MaxValue,
+                    GlobalMaxDownloads - item.TotalDownloadCount);
                 if (remainingDownloads <= 0)
                 {
                     return WishlistDownloadResult.Empty;
                 }
 
+                var itemResultFileFilter = CreateSearchResultFileFilter(filter);
+                var globalResultFileFilter = CreateSearchResultFileFilter(GlobalFilter);
                 var fileFilter = WishlistSearchPolicy.CreateResultFileFilter(
                     item.SearchText,
-                    CreateSearchResultFileFilter(filter));
+                    file => itemResultFileFilter(file) && globalResultFileFilter(file));
                 var alreadyDownloaded = await GetRecentlyCompletedTrackKeysAsync(item.SearchText, cancellationToken)
                     .ConfigureAwait(false);
 
@@ -1079,9 +1091,11 @@ namespace slskd.Wishlist
                     return WishlistDownloadResult.Empty;
                 }
 
-                var finalRemainingDownloads = latestState.MaxDownloads.HasValue
-                    ? latestState.MaxDownloads.Value - latestState.TotalDownloadCount
-                    : int.MaxValue;
+                var finalRemainingDownloads = Math.Min(
+                    latestState.MaxDownloads.HasValue
+                        ? latestState.MaxDownloads.Value - latestState.TotalDownloadCount
+                        : int.MaxValue,
+                    GlobalMaxDownloads - latestState.TotalDownloadCount);
                 if (finalRemainingDownloads <= 0)
                 {
                     return WishlistDownloadResult.Empty;
@@ -1456,7 +1470,7 @@ namespace slskd.Wishlist
 
                 foreach (var formatHint in formatHints)
                 {
-                    yield return formatHint;
+                    yield return formatHint.TrimStart('.');
                 }
             }
         }
@@ -1523,16 +1537,19 @@ namespace slskd.Wishlist
             string searchText,
             string filter,
             IReadOnlyCollection<WishlistIgnoredResult> ignoredResults,
-            IReadOnlySet<string> blockedUsers)
+            IReadOnlySet<string> blockedUsers,
+            string globalFilter = "")
         {
             if (search?.Responses == null)
             {
                 return new WishlistHitStats(0, 0, 0, 0, 0);
             }
 
+            var itemFileFilter = CreateSearchResultFileFilter(filter);
+            var globalFileFilter = CreateSearchResultFileFilter(globalFilter);
             var fileFilter = WishlistSearchPolicy.CreateResultFileFilter(
                 searchText,
-                CreateSearchResultFileFilter(filter));
+                file => itemFileFilter(file) && globalFileFilter(file));
             var visible = 0;
             var hiddenLocked = 0;
             var filteredOut = 0;
@@ -1670,7 +1687,8 @@ namespace slskd.Wishlist
                     continue;
                 }
 
-                (isExclude ? exclude : include).Add(term.TrimStart('.'));
+                // A leading dot (".flac") is kept: it means "match the extension only" (see MatchesFilenameClause).
+                (isExclude ? exclude : include).Add(term);
             }
 
             AddClause();
@@ -1714,9 +1732,13 @@ namespace slskd.Wishlist
             string extension,
             WishlistFilterClause clause)
         {
+            // ".flac" matches the extension only; a bare "flac" also matches anywhere in the path (legacy),
+            // which lets "cover.jpg" in an "[FLAC]" folder through.
             return clause.Include.Count == 0 || clause.Include.Any(term =>
-                extension.Equals(term.TrimStart('.'), StringComparison.Ordinal)
-                || normalizedFilename.Contains(term, StringComparison.Ordinal));
+                term.StartsWith('.')
+                    ? extension.Equals(term[1..], StringComparison.Ordinal)
+                    : extension.Equals(term, StringComparison.Ordinal)
+                        || normalizedFilename.Contains(term, StringComparison.Ordinal));
         }
 
         private static bool TryParseMinimumBitrate(string term, out int bitrate)

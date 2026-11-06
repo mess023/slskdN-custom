@@ -2343,6 +2343,23 @@ namespace slskd
             [Description("maximum results per wishlist search")]
             [Range(10, 1000)]
             public int MaxResults { get; init; } = 100;
+
+            /// <summary>
+            ///     Gets a filter applied to every wishlist item on top of its own filter (same syntax, e.g. ".flac OR .wav").
+            /// </summary>
+            [Argument(default, "wishlist-filter")]
+            [EnvironmentVariable("WISHLIST_FILTER")]
+            [Description("filter applied to every wishlist item in addition to its own filter")]
+            public string Filter { get; init; } = string.Empty;
+
+            /// <summary>
+            ///     Gets the maximum number of files one wishlist item may auto-download in total, regardless of its own limit.
+            /// </summary>
+            [Argument(default, "wishlist-max-downloads")]
+            [EnvironmentVariable("WISHLIST_MAX_DOWNLOADS")]
+            [Description("maximum files auto-downloaded per wishlist item (empty = item decides; 1 = one file, never a folder)")]
+            [Range(1, 50)]
+            public int? MaxDownloads { get; init; } = null;
         }
 
         /// <summary>
