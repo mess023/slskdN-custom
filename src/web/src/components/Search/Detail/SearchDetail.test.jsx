@@ -5,11 +5,13 @@ import SearchDetail, {
   shouldFetchSearchResponses,
 } from './SearchDetail';
 import { buildAlbumCandidates } from '../../../lib/albumCandidatePicker';
+import { setExperiencePreferencesSnapshot } from '../../../lib/experiencePreferences';
 import { getResponses } from '../../../lib/searches';
 import { getGroups } from '../../../lib/users';
 import userEvent from '@testing-library/user-event';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
+import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../../../lib/albumCandidatePicker', () => ({
   buildAlbumCandidates: vi.fn(() => []),
@@ -49,6 +51,8 @@ vi.mock('../../../lib/wishlist', () => ({
 }));
 vi.mock('../DiscoveryGraphModal', () => ({ default: () => null }));
 vi.mock('../Response', () => ({
+  buildDownloadRequestFiles: vi.fn(() => []),
+  buildSearchItemActionPath: vi.fn(() => ''),
   default: ({ response, userGroup, userGroupLoading }) => (
     <div
       data-group={userGroup || ''}
@@ -67,6 +71,12 @@ describe('SearchDetail', () => {
     vi.clearAllMocks();
     buildAlbumCandidates.mockReturnValue([]);
     localStorage.clear();
+    setExperiencePreferencesSnapshot(null);
+    // most cases exercise the grouped per-user cards; flat view is covered separately
+    localStorage.setItem(
+      'slskdn:experience-preferences:v1',
+      JSON.stringify({ searchFlatView: false }),
+    );
   });
 
   afterEach(() => {
@@ -199,7 +209,7 @@ describe('SearchDetail', () => {
   it('skips the album-candidate panel when the browser preference is disabled', async () => {
     localStorage.setItem(
       'slskdn:experience-preferences:v1',
-      JSON.stringify({ searchAlbumCandidatesVisible: false }),
+      JSON.stringify({ searchAlbumCandidatesVisible: false, searchFlatView: false }),
     );
     buildAlbumCandidates.mockReturnValue([
       {
@@ -213,6 +223,39 @@ describe('SearchDetail', () => {
     await waitFor(() => expect(getResponses).toHaveBeenCalledTimes(1));
     expect(buildAlbumCandidates).not.toHaveBeenCalled();
     expect(screen.queryByText('Album candidates')).not.toBeInTheDocument();
+  });
+
+  it('shows the flat file table by default and switches to per-user cards from the toolbar', async () => {
+    localStorage.removeItem('slskdn:experience-preferences:v1');
+    getResponses.mockResolvedValue([
+      {
+        fileCount: 1,
+        files: [{ filename: 'a\\track.mp3', size: 10 }],
+        hasFreeUploadSlot: true,
+        lockedFileCount: 0,
+        lockedFiles: [],
+        username: 'flat-peer',
+      },
+    ]);
+
+    render(
+      <MemoryRouter>
+        <SearchDetail {...createProps()} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole('link', { name: 'flat-peer' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Size' })).toBeInTheDocument();
+    expect(screen.queryByTestId('search-response')).not.toBeInTheDocument();
+    expect(buildAlbumCandidates).not.toHaveBeenCalled();
+    expect(screen.queryByText('Album candidates')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByLabelText('Flat view'));
+
+    expect(await screen.findByTestId('search-response')).toHaveTextContent('flat-peer');
+    expect(screen.queryByRole('columnheader', { name: 'Size' })).not.toBeInTheDocument();
+    expect(buildAlbumCandidates).toHaveBeenCalled();
+    expect(JSON.parse(localStorage.getItem('slskdn:experience-preferences:v1')).searchFlatView).toBe(false);
   });
 
   it('clears hydrated results when a reused detail changes to an active search without responses', async () => {

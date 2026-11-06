@@ -25,6 +25,7 @@ const defaults = {
   regionalFormat: 'system',
   playerVisible: true,
   searchAlbumCandidatesVisible: true,
+  searchFlatView: true,
 };
 
 const isObject = (value) =>
@@ -54,6 +55,9 @@ const normalizeStoredPreferences = (stored) => {
     searchAlbumCandidatesVisible: typeof stored.searchAlbumCandidatesVisible === 'boolean'
       ? stored.searchAlbumCandidatesVisible
       : defaults.searchAlbumCandidatesVisible,
+    searchFlatView: typeof stored.searchFlatView === 'boolean'
+      ? stored.searchFlatView
+      : defaults.searchFlatView,
   };
 };
 
@@ -64,7 +68,7 @@ const buildReport = (form) =>
   [
     'slskdN browser experience preferences',
     `Regional format: ${form.regionalFormat}`,
-    `Search: album_candidates=${form.searchAlbumCandidatesVisible}`,
+    `Search: album_candidates=${form.searchAlbumCandidatesVisible} flat_view=${form.searchFlatView}`,
     `Player: visible=${form.playerVisible}`,
   ].join('\n');
 
@@ -223,6 +227,22 @@ const ExperienceSettings = () => {
           </Card.Content>
           <Card.Content>
             <Form>
+              <Popup
+                content={localized('Show search results as one flat, sortable file list (SoulseekQt style) instead of per-user cards.')}
+                trigger={
+                  <Checkbox
+                    aria-label={t('Flat view preference')}
+                    dir={directionFor('Flat view preference')}
+                    lang={languageFor('Flat view preference')}
+                    checked={form.searchFlatView}
+                    label={localized('Flat view')}
+                    onChange={(_, { checked }) =>
+                      update('searchFlatView', Boolean(checked))
+                    }
+                    toggle
+                  />
+                }
+              />
               <Popup
                 content={localized('Show the album-candidate review panel below song searches. It only organizes results already received and does not start another search or contact more peers.')}
                 trigger={

@@ -26,7 +26,10 @@ import {
   removeSavedSearchFilter,
   saveSearchFilter,
 } from '../../../lib/savedSearchFilters';
-import { useExperiencePreference } from '../../../lib/experiencePreferences';
+import {
+  setExperiencePreference,
+  useExperiencePreference,
+} from '../../../lib/experiencePreferences';
 import { getApiErrorMessage } from '../../../lib/apiErrorMessages';
 
 import { formatRegionalNumber, useRegionalLocale } from '../../../lib/regionalFormat';
@@ -45,6 +48,7 @@ import LoaderSegment from '../../Shared/LoaderSegment';
 import Switch from '../../Shared/Switch';
 import DiscoveryGraphModal from '../DiscoveryGraphModal';
 import Response from '../Response';
+import FlatResultsTable, { flattenResponses } from './FlatResultsTable';
 import SearchDetailHeader from './SearchDetailHeader';
 import SearchFilterModal from './SearchFilterModal';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -182,6 +186,7 @@ const SearchDetail = ({
     'searchAlbumCandidatesVisible',
     true,
   );
+  const flatView = useExperiencePreference('searchFlatView', true);
   const playerVisible = useExperiencePreference('playerVisible', true);
 
   const [loading, setLoading] = useState(false);
@@ -571,14 +576,18 @@ const SearchDetail = ({
 
   const albumCandidates = useMemo(
     () => {
-      if (!showAlbumCandidates) return [];
+      if (!showAlbumCandidates || flatView) return [];
 
       return buildAlbumCandidates({
         responses: sortedAndFilteredResults,
         searchText: search.searchText,
       });
     },
-    [search.searchText, showAlbumCandidates, sortedAndFilteredResults],
+    [flatView, search.searchText, showAlbumCandidates, sortedAndFilteredResults],
+  );
+  const flatRows = useMemo(
+    () => (flatView ? flattenResponses(sortedAndFilteredResults) : []),
+    [flatView, sortedAndFilteredResults],
   );
 
   // when a user uses the action buttons, we will *probably* re-use this component,
@@ -786,7 +795,7 @@ const SearchDetail = ({
   };
 
   const filteredCount = results?.length - sortedAndFilteredResults.length;
-  const remainingCount = sortedAndFilteredResults.length - displayCount;
+  const remainingCount = flatView ? 0 : sortedAndFilteredResults.length - displayCount;
   const loaded = !removing && !creating && !loading && results;
 
   if (error) {
@@ -864,7 +873,7 @@ const SearchDetail = ({
                 />
               )}
             />
-            <Popup
+            {!flatView && <Popup
               content={localized('Choose how many matching results to render at once.')}
               trigger={(
                 <Dropdown
@@ -886,9 +895,33 @@ const SearchDetail = ({
                   text={pageSize >= 999_999 ? localized('Show All') : localized('{count} per page', { count: formatRegionalNumber(pageSize, undefined, regionalLocale) })}
                 />
               )}
-            />
+            />}
             <DownloadDestinationSelector onChange={setDownloadDestination} />
             <div className="search-option-toggles">
+              <Popup
+                content={localized('Show search results as one flat, sortable file list (SoulseekQt style) instead of per-user cards.')}
+                position="top center"
+                trigger={
+                  <Checkbox
+                    aria-label={t('Flat view')}
+                    checked={flatView}
+                    className="search-options-flat-view"
+                    label={localized('Flat view')}
+                    onChange={() => setExperiencePreference('searchFlatView', !flatView)}
+                    toggle
+                  />
+                }
+              />
+              {!flatView && (
+                <Checkbox
+                  aria-label={t('Show album candidates')}
+                  checked={showAlbumCandidates}
+                  className="search-options-album-candidates"
+                  label={localized('Show album candidates')}
+                  onChange={() => setExperiencePreference('searchAlbumCandidatesVisible', !showAlbumCandidates)}
+                  toggle
+                />
+              )}
               <Checkbox
                 checked={hideLocked}
                 className="search-options-hide-locked"
@@ -910,13 +943,15 @@ const SearchDetail = ({
                 onChange={() => setHideBlockedUsers(!hideBlockedUsers)}
                 toggle
               />
-              <Checkbox
-                checked={foldResults}
-                className="search-options-fold-results"
-                label={localized('Fold Results')}
-                onChange={() => setFoldResults(!foldResults)}
-                toggle
-              />
+              {!flatView && (
+                <Checkbox
+                  checked={foldResults}
+                  className="search-options-fold-results"
+                  label={localized('Fold Results')}
+                  onChange={() => setFoldResults(!foldResults)}
+                  toggle
+                />
+              )}
               <Popup
               content={localized('Fold duplicate file candidates that appear from multiple providers or peers, keeping the highest-ranked visible result and showing the folded sources as metadata.')}
                 position="top center"
@@ -1239,7 +1274,16 @@ const SearchDetail = ({
             </List>
           </Segment>
         )}
-        {loaded &&
+        {loaded && flatView && (
+          <FlatResultsTable
+            destination={downloadDestination}
+            disabled={disabled}
+            rows={flatRows}
+            searchId={id}
+            searchText={search.searchText}
+          />
+        )}
+        {loaded && !flatView &&
           visibleResults.map((r, index) => (
             <Response
               disabled={disabled}
