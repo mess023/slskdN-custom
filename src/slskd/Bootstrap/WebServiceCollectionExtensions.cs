@@ -515,6 +515,7 @@ public static class WebServiceCollectionExtensions
             {
                 options.Filters.Add(new AuthorizeFilter(AuthPolicy.Any));
                 options.Filters.Add<ScopedApiKeyDenyByDefaultFilter>();
+                options.Filters.Add<slskd.Common.EncodedSlashRouteValueFilter>();
             })
             .ConfigureApplicationPartManager(manager =>
             {
