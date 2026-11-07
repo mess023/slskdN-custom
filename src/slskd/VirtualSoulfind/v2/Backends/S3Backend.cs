@@ -41,14 +41,14 @@ namespace slskd.VirtualSoulfind.v2.Backends
         public ContentDomain? SupportedDomain => null;
 
         /// <summary>
-        ///     Find S3 candidates from source registry. Filters by bucket allowlist when configured.
+        ///     Find S3 candidates from source registry. Only allowlisted buckets; an empty allowlist admits nothing.
         /// </summary>
         public async Task<IReadOnlyList<SourceCandidate>> FindCandidatesAsync(
             ContentItemId itemId,
             CancellationToken cancellationToken = default)
         {
             var opts = _options.CurrentValue;
-            if (!opts.Enabled)
+            if (!opts.Enabled || opts.BucketAllowlist == null || opts.BucketAllowlist.Count == 0)
             {
                 return Array.Empty<SourceCandidate>();
             }
@@ -58,15 +58,10 @@ namespace slskd.VirtualSoulfind.v2.Backends
                 ContentBackendType.S3,
                 cancellationToken);
 
-            if (opts.BucketAllowlist != null && opts.BucketAllowlist.Count > 0)
-            {
-                var allow = new HashSet<string>(opts.BucketAllowlist, StringComparer.OrdinalIgnoreCase);
-                return candidates
-                    .Where(c => TryParseRef(c.BackendRef, out var b, out _) && !string.IsNullOrEmpty(b) && allow.Contains(b))
-                    .ToList();
-            }
-
-            return candidates.ToList();
+            var allow = new HashSet<string>(opts.BucketAllowlist, StringComparer.OrdinalIgnoreCase);
+            return candidates
+                .Where(c => TryParseRef(c.BackendRef, out var b, out _) && !string.IsNullOrEmpty(b) && allow.Contains(b))
+                .ToList();
         }
 
         /// <summary>
@@ -97,14 +92,14 @@ namespace slskd.VirtualSoulfind.v2.Backends
                 return SourceCandidateValidationResult.Invalid("S3 backend disabled");
             }
 
-            if (opts.BucketAllowlist != null && opts.BucketAllowlist.Count > 0)
+            if (opts.BucketAllowlist == null || opts.BucketAllowlist.Count == 0)
             {
-                var allowed = opts.BucketAllowlist.Any(b =>
-                    string.Equals(b, bucket, StringComparison.OrdinalIgnoreCase));
-                if (!allowed)
-                {
-                    return SourceCandidateValidationResult.Invalid($"Bucket {bucket} not in allowlist");
-                }
+                return SourceCandidateValidationResult.Invalid("No bucket allowlist configured");
+            }
+
+            if (!opts.BucketAllowlist.Any(b => string.Equals(b, bucket, StringComparison.OrdinalIgnoreCase)))
+            {
+                return SourceCandidateValidationResult.Invalid($"Bucket {bucket} not in allowlist");
             }
 
             AmazonS3Client? client = null;
@@ -168,11 +163,11 @@ namespace slskd.VirtualSoulfind.v2.Backends
             if (!opts.Enabled)
                 throw new InvalidOperationException("S3 backend disabled");
 
-            if (opts.BucketAllowlist != null && opts.BucketAllowlist.Count > 0)
-            {
-                if (!opts.BucketAllowlist.Any(b => string.Equals(b, bucket, StringComparison.OrdinalIgnoreCase)))
-                    throw new InvalidOperationException($"Bucket {bucket} not in allowlist");
-            }
+            if (opts.BucketAllowlist == null || opts.BucketAllowlist.Count == 0)
+                throw new InvalidOperationException("No bucket allowlist configured");
+
+            if (!opts.BucketAllowlist.Any(b => string.Equals(b, bucket, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException($"Bucket {bucket} not in allowlist");
 
             AmazonS3Client? client = null;
             try
@@ -287,8 +282,8 @@ namespace slskd.VirtualSoulfind.v2.Backends
         /// <summary>Force path-style for S3-compatible (MinIO). Default true when Endpoint is set.</summary>
         public bool ForcePathStyle { get; init; } = true;
 
-        /// <summary>Bucket allowlist (optional). When set, only these buckets are accepted.</summary>
-        public List<string>? BucketAllowlist { get; init; }
+        /// <summary>Bucket allowlist. Only these buckets are accepted; empty denies all (like the HTTP/WebDAV domain allowlist).</summary>
+        public List<string> BucketAllowlist { get; init; } = new();
 
         /// <summary>Maximum object size (bytes).</summary>
         public long MaxFileSizeBytes { get; init; } = 500_000_000;

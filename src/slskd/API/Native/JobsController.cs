@@ -73,10 +73,10 @@ public class JobsController : ControllerBase
         var release = await musicBrainzClient.GetReleaseAsync(releaseId, cancellationToken);
         if (release == null || string.IsNullOrWhiteSpace(release.MusicBrainzArtistId))
         {
-            return NotFound("Unable to resolve release into a SongID-ready MusicBrainz target.");
+            return Rejected("MusicBrainz returned no release with an artist for this MBID.");
         }
 
-        var jobId = await discographyJobService.CreateJobAsync(
+        return await CreateAsync(() => discographyJobService.CreateJobAsync(
             new DiscographyJobRequest
             {
                 ArtistId = release.MusicBrainzArtistId,
@@ -84,13 +84,7 @@ public class JobsController : ControllerBase
                 TargetDirectory = targetDir,
                 ReleaseIds = new List<string> { releaseId },
             },
-            cancellationToken);
-
-        return Ok(new
-        {
-            job_id = jobId,
-            status = "pending",
-        });
+            cancellationToken));
     }
 
     /// <summary>
@@ -124,13 +118,7 @@ public class JobsController : ControllerBase
 
         logger.LogInformation("Creating discography job for {ArtistId}", request.ArtistId);
 
-        var jobId = await discographyJobService.CreateJobAsync(request, cancellationToken);
-
-        return Ok(new
-        {
-            job_id = jobId,
-            status = "pending",
-        });
+        return await CreateAsync(() => discographyJobService.CreateJobAsync(request, cancellationToken));
     }
 
     /// <summary>
@@ -159,13 +147,7 @@ public class JobsController : ControllerBase
 
         logger.LogInformation("Creating label crate job for {Label}", request.LabelName ?? request.LabelId);
 
-        var jobId = await labelCrateJobService.CreateJobAsync(request, cancellationToken);
-
-        return Ok(new
-        {
-            job_id = jobId,
-            status = "pending",
-        });
+        return await CreateAsync(() => labelCrateJobService.CreateJobAsync(request, cancellationToken));
     }
 
     /// <summary>
@@ -296,6 +278,32 @@ public class JobsController : ControllerBase
         }
 
         return NotFound();
+    }
+
+    /// <summary>
+    ///     Creates the job and answers { job_id, status }, or 422 with the plain-text reason when it cannot become a job.
+    /// </summary>
+    private async Task<IActionResult> CreateAsync(Func<Task<string>> create)
+    {
+        try
+        {
+            return Ok(new
+            {
+                job_id = await create(),
+                status = "pending",
+            });
+        }
+        catch (JobRejectedException ex)
+        {
+            return Rejected(ex.Message);
+        }
+    }
+
+    private ContentResult Rejected(string reason)
+    {
+        var result = Content(reason, "text/plain");
+        result.StatusCode = StatusCodes.Status422UnprocessableEntity;
+        return result;
     }
 
     private static string MapStatus(JobStatus status)

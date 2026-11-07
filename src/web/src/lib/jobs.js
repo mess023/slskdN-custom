@@ -76,6 +76,18 @@ export const createMbReleaseJob = async ({
 };
 
 /**
+ * Create a label crate job. The server matches the label name against releases already in the
+ * local MusicBrainz cache; label MBIDs are not supported.
+ * @param {object} options
+ * @param {string} options.labelName - Record label name
+ * @returns {Promise<object>} `{ job_id, status }`
+ */
+export const createLabelCrateJob = async ({ labelName }) => {
+  const response = await api.post('/jobs/label-crate', { label_name: labelName });
+  return response.data;
+};
+
+/**
  * Get active swarm download jobs.
  * @returns {Promise<Array>} List of active swarm jobs
  */

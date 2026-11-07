@@ -50,6 +50,7 @@ public static class IntegrationAndMediaServiceCollectionExtensions
         new Migrations.Z08162026_LidarrEditionMatchingMigration($"Data Source={wishlistDbPath}").Apply();
         new Migrations.Z08172026_LidarrImportHistoryMigration($"Data Source={wishlistDbPath}").Apply();
         new Migrations.Z09062026_WishlistBlockedHitCountMigration($"Data Source={wishlistDbPath}").Apply();
+        new Migrations.Z11072026_WishlistJobIdMigration($"Data Source={wishlistDbPath}").Apply();
 
         services.AddSingleton<Wishlist.IWishlistService, Wishlist.WishlistService>();
         services.AddHostedService(provider => (Wishlist.WishlistService)provider.GetRequiredService<Wishlist.IWishlistService>());

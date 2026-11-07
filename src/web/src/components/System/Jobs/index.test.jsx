@@ -14,6 +14,7 @@ import {
   within,
 } from '@testing-library/react';
 import React from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { toast } from 'react-toastify';
 
 // Mock dependencies
@@ -26,6 +27,7 @@ vi.mock('../../Shared/useFeatureGates', () => ({
 vi.mock('react-toastify', () => ({
   toast: {
     error: vi.fn(),
+    success: vi.fn(),
   },
 }));
 vi.mock('../SwarmVisualization', () => {
@@ -37,6 +39,15 @@ vi.mock('../SwarmVisualization', () => {
     },
   };
 });
+
+const artistMbid = 'a74b1b7f-71a5-4011-9441-d0b5e4122711';
+
+const renderJobs = () =>
+  render(
+    <MemoryRouter>
+      <Jobs />
+    </MemoryRouter>,
+  );
 
 describe('Jobs', () => {
   const mockJobs = [
@@ -104,19 +115,19 @@ describe('Jobs', () => {
   });
 
   it('renders the component', () => {
-    render(<Jobs />);
+    renderJobs();
     // Component should render (may not have explicit "Jobs" header)
     expect(jobsLibrary.getJobs).toHaveBeenCalled();
   });
 
   it('displays loading state initially', () => {
-    render(<Jobs />);
+    renderJobs();
     // Component should render and start fetching
     expect(jobsLibrary.getJobs).toHaveBeenCalled();
   });
 
   it('fetches and displays jobs', async () => {
-    render(<Jobs />);
+    renderJobs();
 
     await waitFor(() => {
       expect(screen.getByText('job-1')).toBeInTheDocument();
@@ -138,7 +149,7 @@ describe('Jobs', () => {
       ready: true,
     });
 
-    render(<Jobs />);
+    renderJobs();
 
     expect(await screen.findByText('job-1')).toBeInTheDocument();
     expect(jobsLibrary.getJobs).toHaveBeenCalled();
@@ -148,7 +159,7 @@ describe('Jobs', () => {
   });
 
   it('fetches and displays swarm jobs', async () => {
-    render(<Jobs />);
+    renderJobs();
 
     await waitFor(() => {
       expect(screen.getByText('Active Swarm Downloads')).toBeInTheDocument();
@@ -159,7 +170,7 @@ describe('Jobs', () => {
   });
 
   it('displays analytics statistics', async () => {
-    render(<Jobs />);
+    renderJobs();
 
     await waitFor(() => {
       expect(screen.getByText('job-1')).toBeInTheDocument();
@@ -171,7 +182,7 @@ describe('Jobs', () => {
   });
 
   it('allows filtering jobs by type', async () => {
-    render(<Jobs />);
+    renderJobs();
 
     await waitFor(() => {
       expect(screen.getByText('job-1')).toBeInTheDocument();
@@ -184,7 +195,7 @@ describe('Jobs', () => {
   });
 
   it('allows filtering jobs by status', async () => {
-    render(<Jobs />);
+    renderJobs();
 
     await waitFor(() => {
       expect(screen.getByText('job-1')).toBeInTheDocument();
@@ -198,7 +209,7 @@ describe('Jobs', () => {
   });
 
   it('allows changing sort order', async () => {
-    render(<Jobs />);
+    renderJobs();
 
     await waitFor(() => {
       expect(screen.getByText('job-1')).toBeInTheDocument();
@@ -212,7 +223,7 @@ describe('Jobs', () => {
 
   it('opens and closes the swarm visualization from the keyboard', async () => {
     const user = userEvent.setup();
-    render(<Jobs />);
+    renderJobs();
 
     await waitFor(() => {
       expect(screen.getByText('Active Swarm Downloads')).toBeInTheDocument();
@@ -243,7 +254,7 @@ describe('Jobs', () => {
     const error = new Error('Network error');
     jobsLibrary.getJobs.mockRejectedValue(error);
 
-    render(<Jobs />);
+    renderJobs();
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalled();
@@ -252,7 +263,7 @@ describe('Jobs', () => {
 
   it('refreshes swarm jobs periodically', async () => {
     vi.useFakeTimers();
-    render(<Jobs />);
+    renderJobs();
 
     await act(async () => {
       await Promise.resolve();
@@ -285,7 +296,7 @@ describe('Jobs', () => {
         },
       ]);
 
-    render(<Jobs />);
+    renderJobs();
 
     expect(await screen.findByText('20%')).toBeInTheDocument();
 
@@ -304,7 +315,7 @@ describe('Jobs', () => {
       }),
     );
 
-    render(<Jobs />);
+    renderJobs();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(20_000);
@@ -326,7 +337,7 @@ describe('Jobs', () => {
       .mockRejectedValueOnce(new Error('temporary failure'))
       .mockResolvedValueOnce([]);
 
-    render(<Jobs />);
+    renderJobs();
 
     expect(await screen.findByText(/file\.mp3/)).toBeInTheDocument();
 
@@ -348,7 +359,7 @@ describe('Jobs', () => {
       value: true,
     });
 
-    render(<Jobs />);
+    renderJobs();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(20_000);
@@ -380,7 +391,7 @@ describe('Jobs', () => {
       total: 50,
     });
 
-    render(<Jobs />);
+    renderJobs();
 
     await waitFor(() => {
       expect(screen.getByText('job-1')).toBeInTheDocument();
@@ -404,12 +415,64 @@ describe('Jobs', () => {
     });
     jobsLibrary.getActiveSwarmJobs.mockResolvedValue([]);
 
-    render(<Jobs />);
+    renderJobs();
+
+    expect(await screen.findByText('No jobs yet')).toBeInTheDocument();
+    expect(screen.getByText(/download plans for a whole discography/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Go to Search' })).toHaveAttribute('href', '/searches');
+    expect(screen.queryByText('No jobs match the current filters.')).not.toBeInTheDocument();
+  });
+
+  it('opens the new job modal', async () => {
+    const user = userEvent.setup();
+    renderJobs();
+    await screen.findByText('job-1');
+
+    await user.click(screen.getByRole('button', { name: 'New job' }));
+
+    expect(screen.getByLabelText('MusicBrainz artist MBID')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
+  });
+
+  it('creates a discography job and refreshes the list', async () => {
+    const user = userEvent.setup();
+    jobsLibrary.createDiscographyJob.mockResolvedValue({ job_id: 'disc-9', status: 'pending' });
+    renderJobs();
+    await screen.findByText('job-1');
+    jobsLibrary.getJobs.mockClear();
+
+    await user.click(screen.getByRole('button', { name: 'New job' }));
+    await user.type(screen.getByLabelText('MusicBrainz artist MBID'), ` ${artistMbid} `);
+    await user.type(screen.getByLabelText('Target directory'), '/downloads/Artist');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
-      // Should show empty state or no jobs message
-      expect(jobsLibrary.getJobs).toHaveBeenCalled();
+      expect(jobsLibrary.createDiscographyJob).toHaveBeenCalledWith({
+        artistId: artistMbid,
+        profile: 'CoreDiscography',
+        targetDirectory: '/downloads/Artist',
+      });
     });
+    expect(toast.success).toHaveBeenCalledWith('Planned job disc-9');
+    expect(jobsLibrary.getJobs).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.queryByLabelText('MusicBrainz artist MBID')).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows a generic error inside the dialog when job creation fails without a reason', async () => {
+    const user = userEvent.setup();
+    jobsLibrary.createDiscographyJob.mockRejectedValue(new Error('boom'));
+    renderJobs();
+    await screen.findByText('job-1');
+
+    await user.click(screen.getByRole('button', { name: 'New job' }));
+    await user.type(screen.getByLabelText('MusicBrainz artist MBID'), artistMbid);
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(await screen.findByText('Failed to create job')).toBeInTheDocument();
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('MusicBrainz artist MBID')).toBeInTheDocument();
   });
 
   it('ignores malformed jobs and swarm jobs payloads', async () => {
@@ -422,7 +485,7 @@ describe('Jobs', () => {
       jobs: [{ jobId: 'swarm-1' }],
     });
 
-    render(<Jobs />);
+    renderJobs();
 
     await waitFor(() => {
       expect(jobsLibrary.getJobs).toHaveBeenCalled();

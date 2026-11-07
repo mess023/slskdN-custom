@@ -15,6 +15,12 @@ namespace slskd.Jobs
         Failed,
     }
 
+    /// <summary>
+    ///     A job request that cannot become a job (no releases, target directory not allowed). Nothing was stored;
+    ///     the message says why and is shown to the user as is.
+    /// </summary>
+    public sealed class JobRejectedException(string message) : Exception(message);
+
     public class DiscographyJob
     {
         public string JobId { get; set; } = string.Empty;

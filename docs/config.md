@@ -1764,13 +1764,21 @@ Torrent acquisition is off by default. To enable it, set
 `virtualSoulfindV2.backends.torrent.enabled: true`. The default
 `private_only: true` mode removes tracker and web-seed URLs from magnets,
 disables BitTorrent DHT and PEX, and admits only peers from the configured
-source policy. `allowed_peer_sources` accepts `overlay`, `invite_list`, or
-`both`; `invite_list` entries use `host:port`. The standalone resolver fetch
+source policy. `allowed_peer_sources` accepts `Overlay`, `InviteList`, or
+`Both`; `invite_list` entries use `host:port`. The standalone resolver fetch
 uses invite-list peers because its source records do not carry overlay peer
-endpoints. Cross-peer Swarm fallback is currently rejected until sender-side
-activation and job cancellation are connected; it does not start a torrent
-manager. `private_only` also disables local peer discovery engine-wide, which
-affects public-mode torrent transfers in the same process.
+endpoints. So with `private_only: true`, torrent only counts as active when
+`invite_list` holds a valid `host:port` and `allowed_peer_sources` is
+`InviteList` or `Both`; otherwise `GET /api/source-providers` reports
+`active: false` with the reason. Cross-peer Swarm fallback is currently
+rejected until sender-side activation and job cancellation are connected; it
+does not start a torrent manager. `private_only` also disables local peer
+discovery engine-wide, which affects public-mode torrent transfers in the same
+process.
+
+`private_only` and `disable_dht` also decide whether the torrent engine runs a
+DHT node. The engine is set up once, so changing either of them takes effect
+after a restart. The other torrent keys apply live.
 
 ```yaml
 virtualSoulfindV2:
@@ -1781,8 +1789,56 @@ virtualSoulfindV2:
       private_only: true
       disable_dht: true
       disable_pex: true
-      allowed_peer_sources: both
+      allowed_peer_sources: Both
       invite_list: []
+```
+
+### VirtualSoulfind v2 Source Providers
+
+Every acquisition provider has its own section under
+`virtual_soulfind_v2.backends` with an `enabled` flag: `local_library`,
+`soulseek` (both default `true`), `native_mesh`, `mesh_dht`, `http`, `webdav`,
+`s3`, `lan`, and `torrent` (all default `false`). These settings are
+live-reloaded; saving `slskd.yml` applies them without a restart (unless
+`flags.no_config_watch` is set), except `torrent.private_only` and
+`torrent.disable_dht` (see above). The keys the backends use, with their
+defaults, are in
+[system-surfaces.md](system-surfaces.md#source-providers); the live state per
+provider is shown under **System -> Source Providers** and by
+`GET /api/source-providers` (`enabled`, `active`, `disabledReason`,
+`configKey`).
+
+`http.require_https: true` rejects plain `http://` URLs when candidates are
+found, validated, and fetched. An empty allowlist admits nothing:
+`domain_allowlist` for HTTP and WebDAV, `bucket_allowlist` for S3.
+
+These keys are accepted, so existing files keep loading, but they are not used
+yet: `soulseek.max_searches_per_minute`, `soulseek.max_parallel_searches`,
+`soulseek.max_browses_per_minute`, `http.max_requests_per_minute`,
+`http.request_timeout_ms`, and the `mesh` section (`max_queries_per_minute`,
+`query_timeout_ms`, `min_trust_score`). The v2 Soulseek backend is paced by
+`soulseek.safety` instead.
+
+```yaml
+virtual_soulfind_v2:
+  backends:
+    http:
+      enabled: true
+      domain_allowlist: [files.example.org]
+      require_https: true
+    webdav:
+      enabled: true
+      domain_allowlist: [dav.example.org]
+      bearer_token: "..."
+    s3:
+      enabled: true
+      endpoint: "http://minio.lan:9000"
+      access_key: "..."
+      secret_key: "..."
+      bucket_allowlist: [music]
+    lan:
+      enabled: true
+      allowed_hostnames: [nas]
 ```
 
 Several features have been added that aid in the application's development, debugging, and operation but are generally not valuable for most users.

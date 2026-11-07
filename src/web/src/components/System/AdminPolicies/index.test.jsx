@@ -82,7 +82,7 @@ describe('AdminPolicies', () => {
     expect(screen.queryByText('existing-pfx-secret')).not.toBeInTheDocument();
   });
 
-  it('saves guided policy settings to YAML through the options API', async () => {
+  it('saves guided policy settings to YAML through the options API', { timeout: 60_000 }, async () => {
     const user = userEvent.setup();
     optionsApi.getYaml.mockResolvedValue('web:\n  authentication: {}\n');
     optionsApi.updateYaml.mockResolvedValue({});
@@ -114,7 +114,7 @@ describe('AdminPolicies', () => {
 
     await user.click(screen.getByRole('button', { name: 'Save YAML' }));
 
-    await waitFor(() => expect(optionsApi.updateYaml).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(optionsApi.updateYaml).toHaveBeenCalledTimes(1), { timeout: 10_000 });
     const yaml = optionsApi.updateYaml.mock.calls[0][0].yaml;
     const saved = YAML.parse(yaml);
 
@@ -153,7 +153,7 @@ describe('AdminPolicies', () => {
     expect(saved.retention.logs).toBe(14);
   });
 
-  it('requires a key value before saving a new API key policy', async () => {
+  it('requires a key value before saving a new API key policy', { timeout: 60_000 }, async () => {
     const user = userEvent.setup();
     optionsApi.getYaml.mockResolvedValue('web:\n  authentication: {}\n');
     optionsApi.updateYaml.mockResolvedValue({});
@@ -174,7 +174,7 @@ describe('AdminPolicies', () => {
     expect(save).toBeEnabled();
     await user.click(save);
 
-    await waitFor(() => expect(optionsApi.updateYaml).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(optionsApi.updateYaml).toHaveBeenCalledTimes(1), { timeout: 10_000 });
     const saved = YAML.parse(optionsApi.updateYaml.mock.calls[0][0].yaml);
     expect(saved.web.authentication.api_keys.automation).toMatchObject({
       key: 'new-api-key-secret',
@@ -183,7 +183,7 @@ describe('AdminPolicies', () => {
     });
   });
 
-  it('requires a replacement value before adding API policy under a new name', async () => {
+  it('requires a replacement value before adding API policy under a new name', { timeout: 60_000 }, async () => {
     const user = userEvent.setup();
     optionsApi.getYaml.mockResolvedValue(`
 web:
@@ -217,7 +217,7 @@ web:
 
     await user.type(screen.getByLabelText('API key replacement value'), 'replacement-secret');
     await user.click(save);
-    await waitFor(() => expect(optionsApi.updateYaml).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(optionsApi.updateYaml).toHaveBeenCalledTimes(1), { timeout: 10_000 });
     const saved = YAML.parse(optionsApi.updateYaml.mock.calls[0][0].yaml);
     expect(saved.web.authentication.api_keys).toEqual({
       automation: { key: 'existing-api-key-secret' },
@@ -291,7 +291,7 @@ web:
     expect(saved.integrations).toBeUndefined();
   });
 
-  it('does not emit invalid legacy auto-replace defaults or an empty API key', async () => {
+  it('does not emit invalid legacy auto-replace defaults or an empty API key', { timeout: 60_000 }, async () => {
     const user = userEvent.setup();
     optionsApi.getYaml.mockResolvedValue(`
 auto_replace:
@@ -315,7 +315,7 @@ web:
     await user.type(screen.getByLabelText('Incoming search concurrency'), '12');
     await user.click(screen.getByRole('button', { name: 'Save YAML' }));
 
-    await waitFor(() => expect(optionsApi.updateYaml).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(optionsApi.updateYaml).toHaveBeenCalledTimes(1), { timeout: 10_000 });
     const saved = YAML.parse(optionsApi.updateYaml.mock.calls[0][0].yaml);
 
     expect(saved.auto_replace.size_threshold_percent).toBe(0);

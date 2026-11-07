@@ -4,7 +4,8 @@ name: Docker (custom fork)
 
 on:
   push:
-    branches: [main]
+    # main publishes :latest; test/* branches publish :test so production keeps :latest
+    branches: [main, 'test/**']
     paths-ignore:
       - 'docs/**'
       - '**.md'
@@ -32,6 +33,13 @@ jobs:
           echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/slskdn-custom" >> "$GITHUB_OUTPUT"
           # Same shape as upstream stable versions: <yyyymmddhh>-slskdn.<n>
           echo "version=$(date -u +%Y%m%d%H)-slskdn.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          # Moving tag per branch: main -> :latest, test/K1-K4 -> :test2, any other test/* -> :test
+          case "${GITHUB_REF_NAME}" in
+            main) channel=latest ;;
+            test/K1-K4) channel=test2 ;;
+            *) channel=test ;;
+          esac
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -53,7 +61,7 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.meta.outputs.version }}
           tags: |
-            ${{ steps.meta.outputs.image }}:latest
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.channel }}
             ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
             ${{ steps.meta.outputs.image }}:sha-${{ github.sha }}
           cache-from: type=gha
@@ -64,7 +72,7 @@ jobs:
           {
             echo "### Published"
             echo '```'
-            echo "${{ steps.meta.outputs.image }}:latest"
+            echo "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.channel }}"
             echo "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

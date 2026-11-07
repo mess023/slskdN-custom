@@ -5,10 +5,13 @@ namespace slskd.Jobs
 {
     using System;
     using System.Collections.Generic;
+    using System.IO;
     using System.Text.Json.Serialization;
     using System.Threading;
     using System.Threading.Tasks;
     using Microsoft.Extensions.Logging;
+    using Microsoft.Extensions.Options;
+    using slskd.Destinations;
     using slskd.HashDb;
     using slskd.Integrations.MusicBrainz;
 
@@ -26,17 +29,20 @@ namespace slskd.Jobs
         private readonly IDiscographyProfileService profileService;
         private readonly IArtistReleaseGraphService graphService;
         private readonly IHashDbService hashDb;
+        private readonly IOptionsMonitor<slskd.Options> options;
         private readonly ILogger<DiscographyJobService> log;
 
         public DiscographyJobService(
             IDiscographyProfileService profileService,
             IArtistReleaseGraphService graphService,
             IHashDbService hashDb,
+            IOptionsMonitor<slskd.Options> options,
             ILogger<DiscographyJobService> log)
         {
             this.profileService = profileService;
             this.graphService = graphService;
             this.hashDb = hashDb;
+            this.options = options;
             this.log = log;
         }
 
@@ -47,9 +53,14 @@ namespace slskd.Jobs
                 throw new ArgumentException("ArtistId is required", nameof(request));
             }
 
+            var targetDirectory = ResolveTargetDirectory(request.TargetDirectory);
             var profile = request.Profile;
             var releaseIds = request.ReleaseIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
                 ?? await profileService.GetReleaseIdsForProfileAsync(request.ArtistId, profile, ct).ConfigureAwait(false);
+            if (releaseIds.Count == 0)
+            {
+                throw new JobRejectedException("MusicBrainz returned no releases for this artist and profile.");
+            }
 
             var graph = await graphService.GetArtistReleaseGraphAsync(request.ArtistId, forceRefresh: false, ct).ConfigureAwait(false);
             var job = new DiscographyJob
@@ -58,7 +69,7 @@ namespace slskd.Jobs
                 ArtistId = request.ArtistId,
                 ArtistName = graph?.Name ?? request.ArtistId,
                 Profile = profile,
-                TargetDirectory = request.TargetDirectory ?? string.Empty,
+                TargetDirectory = targetDirectory,
                 ReleaseIds = releaseIds,
                 TotalReleases = releaseIds.Count,
                 Status = JobStatus.Pending,
@@ -110,7 +121,7 @@ namespace slskd.Jobs
 
             var totalReleases = releaseStatuses.Count;
             var status = totalReleases == 0
-                ? JobStatus.Pending
+                ? JobStatus.Failed // nothing to run, ever (creation refuses this now; older jobs end here)
                 : completedReleases == totalReleases
                     ? JobStatus.Completed
                     : failedReleases > 0 && !anyRunning && !anyPending
@@ -146,6 +157,24 @@ namespace slskd.Jobs
 
             // Recalculate aggregate status
             await GetJobAsync(jobId, ct).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        ///     Empty stays empty (default download directory). A relative path goes under the default download
+        ///     directory; the result must stay inside an allowed download root.
+        /// </summary>
+        private string ResolveTargetDirectory(string? targetDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(targetDirectory))
+            {
+                return string.Empty;
+            }
+
+            var current = options.CurrentValue;
+            return DownloadDestinationResolver.NormalizeExplicitPath(
+                    current,
+                    Path.Combine(DownloadDestinationResolver.GetDefaultPath(current), targetDirectory.Trim()))
+                ?? throw new JobRejectedException("Target directory must be inside the downloads directory or a configured destination folder.");
         }
     }
 

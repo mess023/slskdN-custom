@@ -62,7 +62,7 @@ public sealed class VirtualSoulfindServiceCollectionExtensionsTests
                     DisableDht = true,
                     DisablePex = false,
                     AllowedPeerSources = PrivatePeerSource.InviteList,
-                    InviteList = new[] { "peer.example:6881" },
+                    InviteList = ["peer.example:6881"],
                 },
             },
         });
@@ -89,7 +89,7 @@ public sealed class VirtualSoulfindServiceCollectionExtensionsTests
                     Torrent = new TorrentBackendLimits
                     {
                         Enabled = true,
-                        InviteList = new[] { "peer.example:6881" },
+                        InviteList = ["peer.example:6881"],
                     },
                 },
             },
@@ -105,5 +105,61 @@ public sealed class VirtualSoulfindServiceCollectionExtensionsTests
         Assert.True(configured.Enabled);
         Assert.True(configured.PrivateMode.PrivateOnly);
         Assert.Equal(new[] { "peer.example:6881" }, configured.PrivateMode.InviteList);
+    }
+
+    [Fact]
+    public async Task AddSlskdVirtualSoulfindServices_BackendOptionsFollowApplicationOptionsLive()
+    {
+        var monitor = new TestOptionsMonitor<slskd.Options>(new slskd.Options());
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IOptionsMonitor<slskd.Options>>(monitor);
+        services.AddSlskdVirtualSoulfindServices(monitor.CurrentValue);
+        await using var provider = services.BuildServiceProvider();
+
+        var http = provider.GetRequiredService<IOptionsMonitor<HttpBackendOptions>>();
+        var webdav = provider.GetRequiredService<IOptionsMonitor<WebDavBackendOptions>>();
+        var s3 = provider.GetRequiredService<IOptionsMonitor<S3BackendOptions>>();
+        var lan = provider.GetRequiredService<IOptionsMonitor<LanBackendOptions>>();
+        var nativeMesh = provider.GetRequiredService<IOptionsMonitor<NativeMeshBackendOptions>>();
+        var meshDht = provider.GetRequiredService<IOptionsMonitor<MeshDhtBackendOptions>>();
+        var soulseek = provider.GetRequiredService<IOptionsMonitor<SoulseekBackendOptions>>();
+
+        Assert.False(http.CurrentValue.Enabled);
+        Assert.True(soulseek.CurrentValue.Enabled);
+        Assert.Empty(s3.CurrentValue.BucketAllowlist); // passed through, not null
+
+        HttpBackendOptions changed = null;
+        using var _ = http.OnChange((value, _) => changed = value);
+
+        monitor.Set(new slskd.Options
+        {
+            VirtualSoulfindV2 = new VirtualSoulfindV2Options
+            {
+                Backends = new BackendLimits
+                {
+                    Soulseek = new SoulseekBackendLimits { Enabled = false },
+                    Http = new HttpBackendLimits { Enabled = true, DomainAllowlist = ["example.org"], MaxFileSizeBytes = 42, RequireHttps = true },
+                    WebDav = new WebDavBackendLimits { Enabled = true, BearerToken = "tok" },
+                    S3 = new S3BackendLimits { Enabled = true, Endpoint = "http://minio:9000", BucketAllowlist = ["music"] },
+                    Lan = new LanBackendLimits { Enabled = true, AllowedHostnames = ["nas"] },
+                    NativeMesh = new MeshSourceBackendLimits { Enabled = true, MaxCandidatesPerItem = 7 },
+                    MeshDht = new MeshSourceBackendLimits { Enabled = true, MinTrustScore = 0.9f },
+                },
+            },
+        });
+
+        Assert.NotNull(changed);
+        Assert.True(changed.Enabled);
+        Assert.True(http.CurrentValue.Enabled);
+        Assert.Equal(new[] { "example.org" }, http.CurrentValue.DomainAllowlist);
+        Assert.Equal(42, http.CurrentValue.MaxFileSizeBytes);
+        Assert.True(http.CurrentValue.RequireHttps);
+        Assert.False(soulseek.CurrentValue.Enabled);
+        Assert.Equal("tok", webdav.CurrentValue.BearerToken);
+        Assert.Equal(new[] { "music" }, s3.CurrentValue.BucketAllowlist);
+        Assert.Equal(new[] { "nas" }, lan.CurrentValue.AllowedHostnames);
+        Assert.Equal(7, nativeMesh.CurrentValue.MaxCandidatesPerItem);
+        Assert.Equal(0.9f, meshDht.CurrentValue.MinimumTrustScore, 3);
     }
 }

@@ -43,6 +43,10 @@ public sealed class WishlistServicePersistenceTests
             blockedHitCountMigration.Apply();
             blockedHitCountMigration.Apply();
 
+            var jobIdMigration = new Z11072026_WishlistJobIdMigration(connectionString);
+            jobIdMigration.Apply();
+            jobIdMigration.Apply();
+
             using var verificationConnection = new SqliteConnection(connectionString);
             verificationConnection.Open();
             using var verificationCommand = verificationConnection.CreateCommand();
@@ -57,6 +61,8 @@ public sealed class WishlistServicePersistenceTests
             Assert.Contains("LidarrAlbumId", columns);
             Assert.Contains("LidarrTrackId", columns);
             Assert.Contains("LastBlockedHitCount", columns);
+            Assert.Contains("JobId", columns);
+            Assert.Contains("DestinationDirectory", columns);
         }
         finally
         {

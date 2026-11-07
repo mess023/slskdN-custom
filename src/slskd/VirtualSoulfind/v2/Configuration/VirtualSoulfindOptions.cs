@@ -6,6 +6,7 @@ namespace slskd.VirtualSoulfind.v2.Configuration
     using System.Collections.Generic;
     using slskd.VirtualSoulfind.v2.Backends;
     using slskd.VirtualSoulfind.v2.Planning;
+    using YamlDotNet.Serialization;
 
     /// <summary>
     ///     Configuration options for VirtualSoulfind v2.
@@ -90,6 +91,11 @@ namespace slskd.VirtualSoulfind.v2.Configuration
     public sealed class BackendLimits
     {
         /// <summary>
+        ///     Gets or initializes local library backend options.
+        /// </summary>
+        public LocalLibraryBackendLimits LocalLibrary { get; init; } = new LocalLibraryBackendLimits();
+
+        /// <summary>
         ///     Gets or initializes Soulseek backend options.
         /// </summary>
         public SoulseekBackendLimits Soulseek { get; init; } = new SoulseekBackendLimits();
@@ -100,6 +106,16 @@ namespace slskd.VirtualSoulfind.v2.Configuration
         public MeshBackendLimits Mesh { get; init; } = new MeshBackendLimits();
 
         /// <summary>
+        ///     Gets or initializes native mesh (trusted overlay) backend options.
+        /// </summary>
+        public MeshSourceBackendLimits NativeMesh { get; init; } = new MeshSourceBackendLimits();
+
+        /// <summary>
+        ///     Gets or initializes mesh DHT hint backend options.
+        /// </summary>
+        public MeshSourceBackendLimits MeshDht { get; init; } = new MeshSourceBackendLimits();
+
+        /// <summary>
         ///     Gets or initializes Torrent backend options.
         /// </summary>
         public TorrentBackendLimits Torrent { get; init; } = new TorrentBackendLimits();
@@ -108,6 +124,177 @@ namespace slskd.VirtualSoulfind.v2.Configuration
         ///     Gets or initializes HTTP backend options.
         /// </summary>
         public HttpBackendLimits Http { get; init; } = new HttpBackendLimits();
+
+        /// <summary>
+        ///     Gets or initializes WebDAV backend options. Yaml key is <c>webdav</c>.
+        /// </summary>
+        [YamlMember(Alias = "webdav")]
+        public WebDavBackendLimits WebDav { get; init; } = new WebDavBackendLimits();
+
+        /// <summary>
+        ///     Gets or initializes S3 backend options.
+        /// </summary>
+        public S3BackendLimits S3 { get; init; } = new S3BackendLimits();
+
+        /// <summary>
+        ///     Gets or initializes LAN backend options.
+        /// </summary>
+        public LanBackendLimits Lan { get; init; } = new LanBackendLimits();
+    }
+
+    /// <summary>
+    ///     Local library backend options.
+    /// </summary>
+    public sealed class LocalLibraryBackendLimits
+    {
+        /// <summary>
+        ///     Gets or initializes whether the local library backend is enabled.
+        /// </summary>
+        public bool Enabled { get; init; } = true;
+    }
+
+    /// <summary>
+    ///     Options shared by the native mesh and mesh DHT backends.
+    /// </summary>
+    public sealed class MeshSourceBackendLimits
+    {
+        /// <summary>
+        ///     Gets or initializes whether the backend is enabled.
+        /// </summary>
+        public bool Enabled { get; init; }
+
+        /// <summary>
+        ///     Gets or initializes the minimum trust score (0.0 - 1.0) for a candidate.
+        /// </summary>
+        public float MinTrustScore { get; init; } = 0.3f;
+
+        /// <summary>
+        ///     Gets or initializes the maximum candidates returned per item.
+        /// </summary>
+        public int MaxCandidatesPerItem { get; init; } = 20;
+    }
+
+    /// <summary>
+    ///     WebDAV backend options.
+    /// </summary>
+    public sealed class WebDavBackendLimits
+    {
+        /// <summary>
+        ///     Gets or initializes whether the WebDAV backend is enabled.
+        /// </summary>
+        public bool Enabled { get; init; }
+
+        /// <summary>
+        ///     Gets or initializes the allowlisted hosts (SSRF protection).
+        /// </summary>
+        public List<string> DomainAllowlist { get; init; } = new List<string>();
+
+        /// <summary>
+        ///     Gets or initializes the maximum file size in bytes.
+        /// </summary>
+        public long MaxFileSizeBytes { get; init; } = 500_000_000;
+
+        /// <summary>
+        ///     Gets or initializes the validation request timeout in seconds.
+        /// </summary>
+        public int ValidationTimeoutSeconds { get; init; } = 15;
+
+        /// <summary>
+        ///     Gets or initializes the basic auth username.
+        /// </summary>
+        public string? Username { get; init; }
+
+        /// <summary>
+        ///     Gets or initializes the basic auth password.
+        /// </summary>
+        [Secret]
+        public string? Password { get; init; }
+
+        /// <summary>
+        ///     Gets or initializes the bearer token (overrides basic auth when set).
+        /// </summary>
+        [Secret]
+        public string? BearerToken { get; init; }
+    }
+
+    /// <summary>
+    ///     S3 backend options.
+    /// </summary>
+    public sealed class S3BackendLimits
+    {
+        /// <summary>
+        ///     Gets or initializes whether the S3 backend is enabled.
+        /// </summary>
+        public bool Enabled { get; init; }
+
+        /// <summary>
+        ///     Gets or initializes the endpoint for S3-compatible services. Leave empty for AWS S3.
+        /// </summary>
+        public string? Endpoint { get; init; }
+
+        /// <summary>
+        ///     Gets or initializes the AWS region.
+        /// </summary>
+        public string? Region { get; init; }
+
+        /// <summary>
+        ///     Gets or initializes the access key.
+        /// </summary>
+        public string? AccessKey { get; init; }
+
+        /// <summary>
+        ///     Gets or initializes the secret key.
+        /// </summary>
+        [Secret]
+        public string? SecretKey { get; init; }
+
+        /// <summary>
+        ///     Gets or initializes whether to force path-style addressing.
+        /// </summary>
+        public bool ForcePathStyle { get; init; } = true;
+
+        /// <summary>
+        ///     Gets or initializes the allowlisted buckets. Empty denies every bucket.
+        /// </summary>
+        public List<string> BucketAllowlist { get; init; } = new List<string>();
+
+        /// <summary>
+        ///     Gets or initializes the maximum object size in bytes.
+        /// </summary>
+        public long MaxFileSizeBytes { get; init; } = 500_000_000;
+
+        /// <summary>
+        ///     Gets or initializes the validation request timeout in seconds.
+        /// </summary>
+        public int ValidationTimeoutSeconds { get; init; } = 15;
+    }
+
+    /// <summary>
+    ///     LAN backend options.
+    /// </summary>
+    public sealed class LanBackendLimits
+    {
+        /// <summary>
+        ///     Gets or initializes whether the LAN backend is enabled.
+        /// </summary>
+        public bool Enabled { get; init; }
+
+        /// <summary>
+        ///     Gets or initializes the allowed CIDR network ranges. Empty means the private ranges
+        ///     (192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12). Kept empty by default because the
+        ///     configuration binder appends yaml items to defaults instead of replacing them.
+        /// </summary>
+        public List<string> AllowedNetworks { get; init; } = new List<string>();
+
+        /// <summary>
+        ///     Gets or initializes the allowed hostnames for non-IP UNC paths.
+        /// </summary>
+        public List<string> AllowedHostnames { get; init; } = new List<string>();
+
+        /// <summary>
+        ///     Gets or initializes the maximum candidates returned per item.
+        /// </summary>
+        public int MaxCandidatesPerItem { get; init; } = 10;
     }
 
     /// <summary>
@@ -115,6 +302,11 @@ namespace slskd.VirtualSoulfind.v2.Configuration
     /// </summary>
     public sealed class SoulseekBackendLimits
     {
+        /// <summary>
+        ///     Gets or initializes whether the Soulseek backend is enabled.
+        /// </summary>
+        public bool Enabled { get; init; } = true;
+
         /// <summary>
         ///     Gets or initializes the maximum number of searches per minute.
         /// </summary>
@@ -260,7 +452,7 @@ namespace slskd.VirtualSoulfind.v2.Configuration
         /// <summary>
         ///     Gets or initializes manually permitted private peer endpoints in host:port form.
         /// </summary>
-        public IReadOnlyList<string> InviteList { get; init; } = new List<string>();
+        public List<string> InviteList { get; init; } = new List<string>();
     }
 
     /// <summary>
@@ -268,6 +460,26 @@ namespace slskd.VirtualSoulfind.v2.Configuration
     /// </summary>
     public sealed class HttpBackendLimits
     {
+        /// <summary>
+        ///     Gets or initializes whether the HTTP backend is enabled.
+        /// </summary>
+        public bool Enabled { get; init; }
+
+        /// <summary>
+        ///     Gets or initializes the allowlisted hosts (SSRF protection).
+        /// </summary>
+        public List<string> DomainAllowlist { get; init; } = new List<string>();
+
+        /// <summary>
+        ///     Gets or initializes the maximum file size in bytes.
+        /// </summary>
+        public long MaxFileSizeBytes { get; init; } = 500_000_000;
+
+        /// <summary>
+        ///     Gets or initializes the validation request timeout in seconds.
+        /// </summary>
+        public int ValidationTimeoutSeconds { get; init; } = 10;
+
         /// <summary>
         ///     Gets or initializes the maximum number of HTTP requests per minute.
         /// </summary>

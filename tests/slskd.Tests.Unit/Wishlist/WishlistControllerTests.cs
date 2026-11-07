@@ -755,6 +755,7 @@ public class WishlistControllerTests : IDisposable
                 AutoDownload = true,
                 Enabled = true,
                 MaxResults = 25,
+                DestinationDirectory = "/music/jobs/Artist", // a job's target directory
             });
             await context.SaveChangesAsync();
         }
@@ -804,7 +805,7 @@ public class WishlistControllerTests : IDisposable
         downloadService.Verify(service => service.EnqueueAsync(
             "alice",
             It.Is<IEnumerable<slskd.Transfers.Downloads.DownloadEnqueueRequest>>(requests =>
-                requests.All(request => request.WishlistItemId == itemId)),
+                requests.All(request => request.WishlistItemId == itemId && request.DestinationDirectory == "/music/jobs/Artist")),
             It.IsAny<CancellationToken>()));
     }
 

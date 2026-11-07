@@ -27,6 +27,7 @@ public static class MultiSourceFeatureServiceCollectionExtensions
         services.AddSingleton<Jobs.IDiscographyJobService, Jobs.DiscographyJobService>();
         services.AddSingleton<Jobs.ILabelCrateJobService, Jobs.LabelCrateJobService>();
         services.AddSingleton<slskd.API.Native.IJobServiceWithList, slskd.Jobs.HashDbJobServiceListAdapter>();
+        services.AddHostedService<Jobs.JobExecutorService>();
         services.AddSingleton<Signals.Swarm.ISwarmJobStore, Signals.Swarm.InMemorySwarmJobStore>();
         services.AddSingleton<Signals.Swarm.IBitTorrentBackend, Signals.Swarm.MonoTorrentBitTorrentBackend>();
         services.AddSingleton<Transfers.MultiSource.Metrics.ITrafficAccountingService, Transfers.MultiSource.Metrics.TrafficAccountingService>();

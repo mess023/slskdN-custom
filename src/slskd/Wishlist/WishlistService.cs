@@ -4,6 +4,7 @@
 namespace slskd.Wishlist
 {
     using System;
+    using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.IO;
     using System.Linq;
@@ -76,7 +77,8 @@ namespace slskd.Wishlist
         /// <summary>
         ///     Manually triggers a search for a wishlist item.
         /// </summary>
-        Task<SlskdSearch> RunSearchAsync(Guid id, CancellationToken cancellationToken = default);
+        /// <returns>The search, or null without searching when a search for this item is already running.</returns>
+        Task<SlskdSearch?> RunSearchAsync(Guid id, CancellationToken cancellationToken = default);
 
         /// <summary>
         ///     Gets searches linked to a wishlist item.
@@ -115,6 +117,9 @@ namespace slskd.Wishlist
     {
         private const int WishlistInsertBatchSize = 40;
         private const int MaximumAutomaticDownloadsPerSearch = 50;
+
+        // Items whose search is running now; the background cycle, "search now" and automations all go through ExecuteWishlistSearchAsync.
+        private readonly ConcurrentDictionary<Guid, byte> searchesInFlight = new();
 
         public WishlistService(
             IDbContextFactory<WishlistDbContext> contextFactory,
@@ -390,7 +395,7 @@ namespace slskd.Wishlist
         }
 
         /// <inheritdoc/>
-        public async Task<SlskdSearch> RunSearchAsync(Guid id, CancellationToken cancellationToken = default)
+        public async Task<SlskdSearch?> RunSearchAsync(Guid id, CancellationToken cancellationToken = default)
         {
             using var context = ContextFactory.CreateDbContext();
 
@@ -802,7 +807,30 @@ namespace slskd.Wishlist
             }
         }
 
-        private async Task<SlskdSearch> ExecuteWishlistSearchAsync(
+        private async Task<SlskdSearch?> ExecuteWishlistSearchAsync(
+            WishlistItem item,
+            WishlistDbContext context,
+            CancellationToken cancellationToken)
+        {
+            // A second search of an item whose search is still running would only duplicate network traffic
+            // and could enqueue the same release from two peers, so it is skipped.
+            if (!searchesInFlight.TryAdd(item.Id, 0))
+            {
+                Log.Information("Skipped wishlist search for {Id} ({SearchText}): a search for this item is already running", item.Id, item.SearchText);
+                return null;
+            }
+
+            try
+            {
+                return await SearchItemAsync(item, context, cancellationToken);
+            }
+            finally
+            {
+                searchesInFlight.TryRemove(item.Id, out _);
+            }
+        }
+
+        private async Task<SlskdSearch> SearchItemAsync(
             WishlistItem item,
             WishlistDbContext context,
             CancellationToken cancellationToken)
@@ -1123,6 +1151,7 @@ namespace slskd.Wishlist
                         BitDepth = c.BitDepth,
                         Length = c.Length,
                         WishlistItemId = wishlistItemId,
+                        DestinationDirectory = item.DestinationDirectory, // a job's target directory; null = default
                     })
                     .Take(Math.Min(finalRemainingDownloads, MaximumAutomaticDownloadsPerSearch))
                     .ToList();

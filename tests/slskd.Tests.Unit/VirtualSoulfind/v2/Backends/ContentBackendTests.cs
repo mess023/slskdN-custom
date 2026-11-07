@@ -4,6 +4,7 @@
 namespace slskd.Tests.Unit.VirtualSoulfind.v2.Backends
 {
     using System;
+    using System.IO;
     using System.Threading;
     using System.Threading.Tasks;
     using Moq;
@@ -103,6 +104,7 @@ namespace slskd.Tests.Unit.VirtualSoulfind.v2.Backends
                     Endpoint = "http://127.0.0.1:1",
                     AccessKey = "test-access-key",
                     SecretKey = "test-secret-key",
+                    BucketAllowlist = ["test-bucket"],
                 }),
                 Mock.Of<ISourceRegistry>());
             var candidate = new SourceCandidate
@@ -119,6 +121,32 @@ namespace slskd.Tests.Unit.VirtualSoulfind.v2.Backends
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(
                 () => backend.ValidateCandidateAsync(candidate, cancellation.Token));
+        }
+
+        [Fact]
+        public async Task S3Backend_EmptyBucketAllowlist_DeniesAllLikeHttpAndWebDav()
+        {
+            var registry = new InMemorySourceRegistry();
+            var candidate = new SourceCandidate
+            {
+                Id = Guid.NewGuid().ToString(),
+                ItemId = ContentItemId.NewId(),
+                Backend = ContentBackendType.S3,
+                BackendRef = "s3://music/track.flac",
+            };
+            await registry.UpsertCandidateAsync(candidate);
+            var options = new TestOptionsMonitor<S3BackendOptions>(new S3BackendOptions { Enabled = true, Endpoint = "http://127.0.0.1:1" });
+            var backend = new S3Backend(options, registry);
+
+            Assert.Empty(await backend.FindCandidatesAsync(candidate.ItemId));
+            var validation = await backend.ValidateCandidateAsync(candidate);
+            Assert.False(validation.IsValid);
+            Assert.Equal("No bucket allowlist configured", validation.InvalidityReason);
+            var fetch = await Assert.ThrowsAsync<InvalidOperationException>(() => backend.FetchToStreamAsync(candidate, Stream.Null));
+            Assert.Equal("No bucket allowlist configured", fetch.Message);
+
+            options.Set(new S3BackendOptions { Enabled = true, Endpoint = "http://127.0.0.1:1", BucketAllowlist = ["music"] });
+            Assert.Single(await backend.FindCandidatesAsync(candidate.ItemId));
         }
 
         [Fact]

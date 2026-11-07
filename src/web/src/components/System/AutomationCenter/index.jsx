@@ -1,208 +1,238 @@
-import LocalizedText from "../../Shared/LocalizedText";
-import { interfaceText, interfaceTextProps, useInterfaceLanguage } from "../../../lib/interfaceLocale";
-import { getRegionalLocale } from '../../../lib/regionalFormat';
-import {
-  automationRecipes,
-  buildAutomationExecutionReport,
-  buildAutomationRunHistory,
-  formatAutomationRunHistoryReport,
-  getAutomationRecipeInputs,
-  getAutomationRecipeState,
-  isAutomationRecipeExecutable,
-  setAutomationRecipeInput,
-  setAutomationRecipeDryRun,
-  setAutomationRecipeEnabled,
-  setAutomationRecipeExecution,
-} from '../../../lib/automationRecipes';
-import { getRunnableWishlistRequests } from '../../../lib/acquisitionRequests';
-import * as libraryHealthAPI from '../../../lib/libraryHealth';
-import * as wishlistAPI from '../../../lib/wishlist';
-import React, { useMemo, useState } from 'react';
+// <copyright file="index.jsx" company="slskdN Team">
+// Copyright (c) slskdN Team. All rights reserved.
+// </copyright>
+
+import * as automationsApi from '../../../lib/automations';
+import { interfaceText, useInterfaceLanguage } from '../../../lib/interfaceLocale';
+import * as optionsApi from '../../../lib/options';
+import AutomationCard from './AutomationCard';
+import AutomationFormModal from './AutomationFormModal';
+import { automationErrorText as errorText, formatRunHistoryText } from './helpers';
+import RunHistory from './RunHistory';
+import * as YAML from 'yaml';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
-import {
-  Button,
-  Card,
-  Checkbox,
-  Form,
-  Header,
-  Icon,
-  Label,
-  Message,
-  Popup,
-  Statistic,
-} from 'semantic-ui-react';
+import { Button, Card, Header, Icon, Message, Popup, Segment, Statistic } from 'semantic-ui-react';
 
-const impactColor = (impact) => {
-  if (/public/i.test(impact)) {
-    return 'orange';
+const HISTORY_LIMIT = 50;
+// GET /automations/runs clamps limit to this (AutomationService.MaxRunsTotal).
+const RUNS_LIMIT_MAX = 1000;
+// The server keeps only this many runs per automation (AutomationService.MaxRunsPerAutomation).
+const RUNS_PER_AUTOMATION_MAX = 200;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const getOption = (source, ...keys) => {
+  for (const key of keys) {
+    if (source && Object.prototype.hasOwnProperty.call(source, key)) return source[key];
   }
 
-  if (/trusted|metadata|configured|local network/i.test(impact)) {
-    return 'blue';
-  }
-
-  return 'green';
+  return undefined;
 };
 
-const formatLastDryRun = (value) => {
-  if (!value) {
-    return 'Not run yet';
-  }
-
-  return new Date(value).toLocaleString(getRegionalLocale());
-};
-
-const AutomationCenter = () => {
+const AutomationCenter = ({ options = {} }) => {
   useInterfaceLanguage();
-  const [recipeState, setRecipeState] = useState(getAutomationRecipeState);
-  const [recipeInputs, setRecipeInputs] = useState(getAutomationRecipeInputs);
+  const remoteConfiguration = Boolean(getOption(options, 'remoteConfiguration', 'RemoteConfiguration'));
+  const [templates, setTemplates] = useState([]);
+  const [automations, setAutomations] = useState([]);
+  const [runs, setRuns] = useState([]);
+  const [failed24h, setFailed24h] = useState({ count: 0, truncated: false });
+  const [yamlDocument, setYamlDocument] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [busyIds, setBusyIds] = useState(() => new Set());
+  const [lastRuns, setLastRuns] = useState({});
+  const [modal, setModal] = useState(null); // null | { automation: null | Automation }
   const [copyStatus, setCopyStatus] = useState('');
-  const [executingRecipe, setExecutingRecipe] = useState('');
-  const summary = useMemo(() => {
-    const enabled = automationRecipes.filter(
-      (recipe) => recipeState[recipe.id]?.enabled,
-    ).length;
 
-    return {
-      disabled: automationRecipes.length - enabled,
-      enabled,
-      total: automationRecipes.length,
-    };
-  }, [recipeState]);
-  const runHistory = useMemo(
-    () => buildAutomationRunHistory(recipeState),
-    [recipeState],
+  const loadRuns = useCallback(async () => {
+    const [latest, lastDay] = await Promise.all([
+      automationsApi.getAllRuns(HISTORY_LIMIT),
+      automationsApi.getAllRuns(RUNS_LIMIT_MAX, new Date(Date.now() - DAY_MS).toISOString()),
+    ]);
+    setRuns(latest);
+    const perAutomation = new Map();
+    for (const run of lastDay) perAutomation.set(run.automationId, (perAutomation.get(run.automationId) ?? 0) + 1);
+    setFailed24h({
+      count: lastDay.filter((run) => run.status === 'failed').length,
+      // The count is a lower bound when the page is full, or when retention may have pruned in-window runs:
+      // an in-window run is only pruned once its automation has RUNS_PER_AUTOMATION_MAX newer (so also in-window) runs.
+      truncated: lastDay.length >= RUNS_LIMIT_MAX
+        || [...perAutomation.values()].some((count) => count >= RUNS_PER_AUTOMATION_MAX),
+    });
+  }, []);
+
+  const loadYaml = useCallback(async () => {
+    try {
+      setYamlDocument(YAML.parseDocument(await optionsApi.getYaml()));
+    } catch {
+      setYamlDocument(null);
+    }
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      const [nextTemplates, nextAutomations] = await Promise.all([
+        automationsApi.getTemplates(),
+        automationsApi.getAutomations(),
+        loadRuns(),
+      ]);
+      setTemplates(Array.isArray(nextTemplates) ? nextTemplates : []);
+      setAutomations(Array.isArray(nextAutomations) ? nextAutomations : []);
+      if ((nextTemplates || []).some((template) => template.linkedOptions?.length)) {
+        await loadYaml();
+      }
+    } catch (error) {
+      setLoadError(errorText(error, interfaceText('Failed to load automations.')));
+    } finally {
+      setLoading(false);
+    }
+  }, [loadRuns, loadYaml]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const templateByType = useMemo(
+    () => Object.fromEntries(templates.map((template) => [template.type, template])),
+    [templates],
   );
 
-  const toggleRecipe = (recipe, enabled) => {
-    setRecipeState(setAutomationRecipeEnabled(recipe.id, enabled));
-    toast.info(interfaceText(enabled ? "{title} enabled" : "{title} disabled", { title: interfaceText(recipe.title) }));
+  const enabledCount = useMemo(() => automations.filter((automation) => automation.enabled).length, [automations]);
+
+  const refreshAutomations = async () => {
+    setAutomations(await automationsApi.getAutomations());
   };
 
-  const dryRunRecipe = (recipe) => {
-    setRecipeState(setAutomationRecipeDryRun(recipe.id));
-    toast.info(interfaceText("{title} dry run recorded", { title: interfaceText(recipe.title) }));
-  };
-
-  const executeWishlistRetry = async (recipe) => {
-    const allRequests = await wishlistAPI.getAll();
-    const runnableRequests = getRunnableWishlistRequests(allRequests, { limit: 3 });
-    const result = {
-      failed: 0,
-      runLimit: 3,
-      skipped: Math.max(allRequests.length - runnableRequests.length, 0),
-      started: 0,
-    };
-
-    for (const request of runnableRequests) {
-      try {
-        await wishlistAPI.runSearch(request.id);
-        result.started += 1;
-      } catch {
-        result.failed += 1;
-      }
-    }
-
-    result.summary = `Ran ${result.started} Wishlist searches; ${result.failed} failed; ${result.skipped} skipped.`;
-    const report = buildAutomationExecutionReport(recipe, result);
-    setRecipeState(setAutomationRecipeExecution(recipe.id, report, report.generatedAt));
-    const status = interfaceText("{title} ran {started} bounded Wishlist searches; {failed} failed. Downloads still require normal result review.", { title: interfaceText(recipe.title), started: result.started, failed: result.failed });
-    setCopyStatus(status);
-    toast.info(status);
-  };
-
-  const executeLibraryHealthScan = async (recipe) => {
-    const libraryPath = `${recipeInputs[recipe.id]?.libraryPath || ''}`.trim();
-    if (!libraryPath) {
-      setCopyStatus(interfaceText('Enter a Library Health path before starting the scan.'));
-      return;
-    }
-
-    const response = await libraryHealthAPI.startScan(libraryPath);
-    const scanId = response?.data?.scanId || response?.scanId || 'unknown';
-    const report = buildAutomationExecutionReport(recipe, {
-      scanId,
-      started: 1,
-      summary: `Started Library Health scan ${scanId} for ${libraryPath}.`,
-    });
-    setRecipeState(setAutomationRecipeExecution(recipe.id, report, report.generatedAt));
-    const status = interfaceText("{title} started scan {scanId} for {libraryPath}.", { title: interfaceText(recipe.title), scanId, libraryPath });
-    setCopyStatus(status);
-    toast.info(status);
-  };
-
-  const executeRecipe = async (recipe) => {
-    if (!isAutomationRecipeExecutable(recipe)) {
-      setCopyStatus(interfaceText('{title} does not have a live backend action wired yet.', {
-        title: interfaceText(recipe.title),
-      }));
-      return;
-    }
-
-    setExecutingRecipe(recipe.id);
+  // Busy is per card: only the card whose own request is in flight is locked.
+  const busyAction = async (id, failure, action) => {
+    setBusyIds((current) => new Set(current).add(id));
     try {
-      if (recipe.id === 'wishlist-retry') {
-        await executeWishlistRetry(recipe);
-      }
-      if (recipe.id === 'library-health-scan') {
-        await executeLibraryHealthScan(recipe);
-      }
+      await action();
+    } catch (error) {
+      toast.error(errorText(error, failure));
     } finally {
-      setExecutingRecipe('');
+      setBusyIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
-  const updateRecipeInput = (recipe, input) => {
-    setRecipeInputs(setAutomationRecipeInput(recipe.id, input));
+  const toRequest = (automation) => ({
+    enabled: automation.enabled,
+    intervalMinutes: automation.intervalMinutes,
+    name: automation.name,
+    parameters: automation.parameters || {},
+    type: automation.type,
+  });
+
+  const toggle = (automation, enabled) =>
+    busyAction(automation.id, interfaceText('Failed to update automation.'), async () => {
+      const updated = await automationsApi.updateAutomation(automation.id, { ...toRequest(automation), enabled });
+      setAutomations((current) => current.map((item) => (item.id === automation.id ? updated : item)));
+    });
+
+  const run = (automation, dryRun) =>
+    busyAction(automation.id, interfaceText('Run failed.'), async () => {
+      const result = await automationsApi.runAutomation(automation.id, { dryRun });
+      setLastRuns((current) => ({ ...current, [automation.id]: result }));
+      toast[result?.status === 'failed' ? 'error' : 'info'](`${automation.name}: ${result?.summary || result?.status}`);
+      await Promise.all([refreshAutomations(), loadRuns()]);
+    });
+
+  const remove = async (automation) => {
+    if (!window.confirm(interfaceText('Delete automation "{name}"?', { name: automation.name }))) return;
+    await busyAction(automation.id, interfaceText('Failed to delete automation.'), async () => {
+      await automationsApi.deleteAutomation(automation.id);
+      setAutomations((current) => current.filter((item) => item.id !== automation.id));
+      await loadRuns();
+    });
   };
 
-  const copyHistoryReport = async () => {
-    const report = formatAutomationRunHistoryReport(runHistory);
+  const submitModal = async (request) => {
+    if (modal?.automation) {
+      await automationsApi.updateAutomation(modal.automation.id, request);
+    } else {
+      await automationsApi.createAutomation(request);
+    }
+
+    await refreshAutomations();
+  };
+
+  // Also reloads the automations so each card's last run and Next match the history rows.
+  const refreshRuns = async () => {
+    try {
+      await Promise.all([refreshAutomations(), loadRuns()]);
+    } catch (error) {
+      toast.error(errorText(error, interfaceText('Failed to load run history.')));
+    }
+  };
+
+  const copyHistory = async () => {
+    const text = formatRunHistoryText(runs);
     if (!navigator.clipboard?.writeText) {
-      setCopyStatus(interfaceText('Clipboard unavailable; copy the automation history manually.'));
+      setCopyStatus(interfaceText('Clipboard unavailable; copy the run history manually.'));
       return;
     }
 
     try {
-      await navigator.clipboard.writeText(report);
-      setCopyStatus(interfaceText('Automation history report copied.'));
+      await navigator.clipboard.writeText(text);
+      setCopyStatus(interfaceText('Run history copied.'));
     } catch {
-      setCopyStatus(interfaceText('Unable to copy automation history report.'));
+      setCopyStatus(interfaceText('Unable to copy run history.'));
     }
   };
+
+  const newButton = (
+    <Popup
+      content={interfaceText('Create an automation from a server-side template. It runs on the server, on a schedule or manually.')}
+      position="top center"
+      trigger={
+        <Button
+          disabled={loading || templates.length === 0}
+          onClick={() => setModal({ automation: null })}
+          primary
+          size="small"
+        >
+          <Icon name="plus" />
+          {interfaceText('New automation')}
+        </Button>
+      }
+    />
+  );
 
   return (
     <div className="automation-center">
       <Header as="h3">
         <Icon name="magic" />
         <Header.Content>
-          <LocalizedText source={"Automation Center"} /><Header.Subheader>
-            <LocalizedText source={"Every automation is visible here. Enable recipes when their dry-run output and impact fit your node."} /></Header.Subheader>
+          {interfaceText('Automation Center')}
+          <Header.Subheader>
+            {interfaceText('Server-side automations built from templates. Dry run previews, Run now executes, the scheduler handles the rest.')}
+          </Header.Subheader>
         </Header.Content>
       </Header>
       <div className="automation-center-actions">
+        {newButton}
         <Popup
-          content={interfaceText("Copy enabled recipes and dry-run checkpoints for operator review. This does not execute any automation.")}
+          content={interfaceText('Reload templates, automations and run history from the server.')}
           position="top center"
           trigger={
             <Button
-              aria-label={interfaceText("Copy automation review history")}
-              onClick={copyHistoryReport}
+              aria-label={interfaceText('Refresh automations')}
+              icon="refresh"
+              loading={loading}
+              onClick={load}
               size="small"
-             {...interfaceTextProps("Copy automation review history")}>
-              <Icon name="copy" />
-              <LocalizedText source={"Copy History"} /></Button>
+            />
           }
-         {...interfaceTextProps("Copy enabled recipes and dry-run checkpoints for operator review. This does not execute any automation.")}/>
+        />
       </div>
-      {copyStatus && (
-        <Message
-          info
-          size="small"
-        >
-          {copyStatus}
-        </Message>
-      )}
+      {loadError && <Message negative size="small">{loadError}</Message>}
+      {copyStatus && <Message info size="small">{copyStatus}</Message>}
 
       <Statistic.Group
         className="automation-summary"
@@ -210,206 +240,82 @@ const AutomationCenter = () => {
         widths="three"
       >
         <Statistic>
-          <Statistic.Value>{summary.total}</Statistic.Value>
-          <Statistic.Label><LocalizedText source={"Recipes"} /></Statistic.Label>
+          <Statistic.Value>{automations.length}</Statistic.Value>
+          <Statistic.Label>{interfaceText('Automations')}</Statistic.Label>
         </Statistic>
         <Statistic color="green">
-          <Statistic.Value>{summary.enabled}</Statistic.Value>
-          <Statistic.Label><LocalizedText source={"Enabled"} /></Statistic.Label>
+          <Statistic.Value>{enabledCount}</Statistic.Value>
+          <Statistic.Label>{interfaceText('Enabled')}</Statistic.Label>
         </Statistic>
-        <Statistic color="orange">
-          <Statistic.Value>{summary.disabled}</Statistic.Value>
-          <Statistic.Label><LocalizedText source={"Visible Disabled"} /></Statistic.Label>
-        </Statistic>
+        <Popup
+          content={interfaceText('Failed runs (dry runs included) started in the last 24 hours. "≥" means some runs in that window were not counted (more than {limit} in total, or older runs already removed because an automation keeps only its latest {perAutomation}), so there may be more failures.', { limit: RUNS_LIMIT_MAX, perAutomation: RUNS_PER_AUTOMATION_MAX })}
+          position="top center"
+          trigger={
+            <Statistic color={failed24h.count > 0 ? 'red' : 'grey'}>
+              <Statistic.Value>{failed24h.truncated ? `≥ ${failed24h.count}` : failed24h.count}</Statistic.Value>
+              <Statistic.Label>{interfaceText('Failed (24h)')}</Statistic.Label>
+            </Statistic>
+          }
+        />
       </Statistic.Group>
 
-      <div className="automation-history-panel">
-        <Header as="h4">
-          <Icon name="history" />
-          <LocalizedText source={"Review History"} /></Header>
-        {runHistory.length === 0 ? (
-          <p><LocalizedText source={"No enabled recipes or dry-run checkpoints yet."} /></p>
-        ) : (
-          <div className="automation-recipe-labels">
-            {runHistory.map((entry) => (
-              <Label
-                basic
-                color={entry.lastRunAt ? 'purple' : entry.lastDryRunAt ? 'green' : 'grey'}
-                key={entry.recipeId}
-              >
-                {interfaceText(entry.title)}
-                <Label.Detail>
-                  {formatLastDryRun(entry.lastRunAt || entry.lastDryRunAt)}
-                </Label.Detail>
-              </Label>
-            ))}
-          </div>
-        )}
-      </div>
+      {!loading && automations.length === 0 && !loadError && (
+        <Segment
+          placeholder
+          textAlign="center"
+        >
+          <Header icon>
+            <Icon name="magic" />
+            {interfaceText('No automations yet')}
+            <Header.Subheader>
+              {templates.length === 0
+                ? interfaceText('The server exposes no automation templates.')
+                : interfaceText('Pick a template, set an interval, and the server runs it for you. Start with a dry run to preview.')}
+            </Header.Subheader>
+          </Header>
+          {newButton}
+        </Segment>
+      )}
 
       <Card.Group
         className="automation-recipe-grid"
         itemsPerRow={2}
         stackable
       >
-        {automationRecipes.map((recipe) => {
-          const state = recipeState[recipe.id] ?? {};
-          const enabled = state.enabled === true;
-          const executable = isAutomationRecipeExecutable(recipe);
-          const executing = executingRecipe === recipe.id;
-          const libraryHealthPath = recipeInputs[recipe.id]?.libraryPath || '';
-          const missingRequiredInput =
-            recipe.id === 'library-health-scan' && !libraryHealthPath.trim();
-
-          return (
-            <Card
-              className="automation-recipe-card"
-              key={recipe.id}
-            >
-              <Card.Content>
-                <div className="automation-recipe-head">
-                  <Header
-                    as="h4"
-                    className="automation-recipe-title"
-                  >
-                    <Icon name={recipe.icon} />
-                    <Header.Content><LocalizedText source={recipe.title} /></Header.Content>
-                  </Header>
-                  <Popup
-                    content={interfaceText(enabled ? "Disable {title}. Disabled recipes remain visible so setup work is discoverable." : "Enable {title}. Disabled recipes remain visible so setup work is discoverable.", { title: interfaceText(recipe.title) })}
-                    position="top center"
-                    trigger={
-                      <Checkbox
-                        aria-label={interfaceText(enabled ? "Disable {title}" : "Enable {title}", { title: interfaceText(recipe.title) })}
-                        checked={enabled}
-                        onChange={(_event, { checked }) =>
-                          toggleRecipe(recipe, checked)
-                        }
-                        toggle
-                      />
-                    }
-                  />
-                </div>
-                <Card.Description><LocalizedText source={recipe.description} /></Card.Description>
-                {recipe.id === 'library-health-scan' && (
-                  <Form className="automation-recipe-config">
-                    <Form.Input
-                      aria-label={interfaceText("Library Health scan path")}
-                      fluid
-                      icon="folder open outline"
-                      onChange={(_event, { value }) =>
-                        updateRecipeInput(recipe, { libraryPath: value })
-                      }
-                      placeholder="/music/library"
-                      value={libraryHealthPath}
-                     {...interfaceTextProps("Library Health scan path")}/>
-                  </Form>
-                )}
-                <div className="automation-recipe-labels">
-                  <Label basic>
-                    <Icon name="clock outline" />
-                    <LocalizedText source={recipe.cadence} />
-                  </Label>
-                  <Label basic>
-                    <Icon name="hourglass half" />
-                    <LocalizedText source={"Cooldown"} />{" "}<LocalizedText source={recipe.cooldown} />
-                  </Label>
-                  <Label basic>
-                    <Icon name="stopwatch" />
-                    <LocalizedText source={"Max"} />{" "}<LocalizedText source={recipe.maxRunTime} />
-                  </Label>
-                  <Label
-                    basic
-                    color={impactColor(recipe.networkImpact)}
-                  >
-                    <Icon name="sitemap" />
-                    <LocalizedText source={recipe.networkImpact} />
-                  </Label>
-                  <Label basic>
-                    <Icon name="file outline" />
-                    <LocalizedText source={recipe.fileImpact} />
-                  </Label>
-                  <Label basic>
-                    <Icon name="lock" />
-                    <LocalizedText source={recipe.approvalGate} />
-                  </Label>
-                </div>
-              </Card.Content>
-              <Card.Content extra>
-                <div className="automation-recipe-actions">
-                  <span className="automation-recipe-dry-run">
-                    <LocalizedText source={"Dry run:"} />{" "}{formatLastDryRun(state.lastDryRunAt)}
-                  </span>
-                  {state.lastDryRunReport && (
-                    <Label
-                      basic
-                      color="green"
-                    >
-                      <LocalizedText source={"Preview only"} /></Label>
-                  )}
-                  {state.lastRunReport && (
-                    <Label
-                      basic
-                      color="purple"
-                    >
-                      <LocalizedText source={"Executed"} /></Label>
-                  )}
-                  <Popup
-                    content={interfaceText("Record a dry run checkpoint for {title}. This shell does not execute network or file actions yet.", { title: interfaceText(recipe.title) })}
-                    position="top center"
-                    trigger={
-                      <Button
-                        aria-label={interfaceText("Record dry run for {title}", { title: interfaceText(recipe.title) })}
-                        basic
-                        icon
-                        onClick={() => dryRunRecipe(recipe)}
-                        size="small"
-                        title={interfaceText("Record dry run for {title}", { title: interfaceText(recipe.title) })}
-                       {...interfaceTextProps("Record dry run for {title}")}>
-                        <Icon name="play circle outline" />
-                      </Button>
-                    }
-                   {...interfaceTextProps("Record a dry run checkpoint for {title}. This shell does not execute network or file actions yet.")}/>
-                  <Popup
-                    content={
-                      executable
-                        ? interfaceText(
-                          'Execute {title} now through its real backend action. Wishlist Retry runs up to three enabled searches; Library Health starts the configured read-only scan.',
-                          { title: recipe.title },
-                        )
-                        : interfaceText(
-                          'No live backend action is wired for {title} yet. Use dry run to track readiness.',
-                          { title: recipe.title },
-                        )
-                    }
-                    position="top center"
-                    trigger={
-                      <span>
-                        <Button
-                          aria-label={interfaceText("Execute {title}", { title: interfaceText(recipe.title) })}
-                          disabled={
-                            !enabled ||
-                            !executable ||
-                            executing ||
-                            missingRequiredInput
-                          }
-                          icon
-                          loading={executing}
-                          onClick={() => executeRecipe(recipe)}
-                          size="small"
-                          title={interfaceText("Execute {title}", { title: interfaceText(recipe.title) })}
-                         {...interfaceTextProps("Execute {title}")}>
-                          <Icon name="bolt" />
-                        </Button>
-                      </span>
-                    }
-                  />
-                </div>
-              </Card.Content>
-            </Card>
-          );
-        })}
+        {automations.map((automation) => (
+          <AutomationCard
+            automation={automation}
+            busy={busyIds.has(automation.id)}
+            key={automation.id}
+            lastRun={lastRuns[automation.id]}
+            onDelete={remove}
+            onEdit={(item) => setModal({ automation: item })}
+            onRun={run}
+            onToggle={toggle}
+            onYamlSaved={loadYaml}
+            remoteConfiguration={remoteConfiguration}
+            runningOptions={options}
+            template={templateByType[automation.type]}
+            yamlDocument={yamlDocument}
+          />
+        ))}
       </Card.Group>
+
+      <RunHistory
+        loading={loading}
+        onCopy={copyHistory}
+        onRefresh={refreshRuns}
+        runs={runs}
+      />
+
+      {modal && (
+        <AutomationFormModal
+          automation={modal.automation}
+          onClose={() => setModal(null)}
+          onSubmit={submitModal}
+          templates={templates}
+        />
+      )}
     </div>
   );
 };

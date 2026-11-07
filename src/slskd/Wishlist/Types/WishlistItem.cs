@@ -135,6 +135,18 @@ namespace slskd.Wishlist
         public string? LidarrReleaseDisambiguation { get; set; }
 
         /// <summary>
+        ///     Gets or sets "&lt;jobId&gt;:&lt;releaseId&gt;" of the discography/label-crate job release that created this item, if any.
+        ///     Null for items the user created; the job executor only reuses, disables or completes the item that carries its release's key.
+        /// </summary>
+        public string? JobId { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the directory automatic downloads of this item go to (the job's target directory, checked
+        ///     against the allowed download roots when the job was created). Null uses the default download directory.
+        /// </summary>
+        public string? DestinationDirectory { get; set; }
+
+        /// <summary>
         ///     Gets or sets the GUID of the most recent search.
         /// </summary>
         public Guid? LastSearchId { get; set; }

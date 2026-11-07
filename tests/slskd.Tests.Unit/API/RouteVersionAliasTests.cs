@@ -30,8 +30,9 @@ public sealed class RouteVersionAliasTests
     [InlineData(typeof(AudioAnalyzerMigrationController), "api/v{version:apiVersion}/audio/analyzers/migrate")]
     [InlineData(typeof(AudioCanonicalController), "api/v{version:apiVersion}/audio/canonical")]
     [InlineData(typeof(AudioDedupeController), "api/v{version:apiVersion}/audio/variants/dedupe")]
-    [InlineData(typeof(DiscographyJobsController), "api/v{version:apiVersion}/jobs/discography")]
-    [InlineData(typeof(LabelCrateJobsController), "api/v{version:apiVersion}/jobs/label-crate")]
+    [InlineData(typeof(JobsController), "api/v{version:apiVersion}/jobs")] // the only job creator (POST jobs/discography, jobs/label-crate, jobs/mb-release)
+    [InlineData(typeof(DiscographyJobsController), "api/v{version:apiVersion}/jobs/discography")] // GET {jobId} only
+    [InlineData(typeof(LabelCrateJobsController), "api/v{version:apiVersion}/jobs/label-crate")] // GET {jobId} only
     [InlineData(typeof(ApiLibraryHealthController), "api/v{version:apiVersion}/library/health")]
     public void ActiveLegacyWebControllers_ExposeVersionedAliases(Type controllerType, string expectedRoute)
     {

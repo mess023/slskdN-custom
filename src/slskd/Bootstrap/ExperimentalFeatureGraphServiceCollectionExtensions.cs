@@ -26,6 +26,8 @@ public static class ExperimentalFeatureGraphServiceCollectionExtensions
 
         services.AddSlskdIntegrationAndMediaServices();
 
+        services.AddSlskdAutomationServices();
+
         return services;
     }
 }

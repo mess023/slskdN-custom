@@ -227,6 +227,19 @@ describe('jobs', () => {
     });
   });
 
+  describe('createLabelCrateJob', () => {
+    it('posts only the label name', async () => {
+      api.post.mockResolvedValue({ data: { job_id: 'crate-1', status: 'pending' } });
+
+      const result = await jobs.createLabelCrateJob({ labelName: 'Warp Records' });
+
+      expect(api.post).toHaveBeenCalledWith('/jobs/label-crate', {
+        label_name: 'Warp Records',
+      });
+      expect(result).toEqual({ job_id: 'crate-1', status: 'pending' });
+    });
+  });
+
   describe('getSwarmJobStatus', () => {
     it('calls API with encoded job ID', async () => {
       const mockStatus = {

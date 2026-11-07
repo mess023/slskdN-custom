@@ -4,6 +4,7 @@
 namespace slskd.Tests.Unit.Jobs;
 
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using slskd.HashDb;
 using slskd.Integrations.MusicBrainz;
@@ -12,6 +13,96 @@ using Xunit;
 
 public class JobServiceAggregationTests
 {
+    private static readonly string Downloads = Path.Combine(Path.GetTempPath(), "slskdn-job-tests", "downloads");
+
+    private static DiscographyJobService CreateDiscographyService(Mock<IHashDbService> hashDb, Mock<IDiscographyProfileService>? profile = null)
+    {
+        var options = new slskd.Options { Directories = new slskd.Options.DirectoriesOptions { Downloads = Downloads } };
+        return new(
+            (profile ?? new Mock<IDiscographyProfileService>()).Object,
+            Mock.Of<IArtistReleaseGraphService>(),
+            hashDb.Object,
+            Mock.Of<IOptionsMonitor<slskd.Options>>(m => m.CurrentValue == options),
+            NullLogger<DiscographyJobService>.Instance);
+    }
+
+    [Fact]
+    public async Task DiscographyCreateJobAsync_WithNoReleases_RejectsAndStoresNothing()
+    {
+        var hashDb = new Mock<IHashDbService>();
+        var profile = new Mock<IDiscographyProfileService>();
+        profile.Setup(p => p.GetReleaseIdsForProfileAsync("artist-1", It.IsAny<DiscographyProfile>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<string>());
+
+        var ex = await Assert.ThrowsAsync<JobRejectedException>(() =>
+            CreateDiscographyService(hashDb, profile).CreateJobAsync(new DiscographyJobRequest { ArtistId = "artist-1" }));
+
+        Assert.Equal("MusicBrainz returned no releases for this artist and profile.", ex.Message);
+        hashDb.Verify(h => h.UpsertDiscographyJobAsync(It.IsAny<DiscographyJob>(), It.IsAny<CancellationToken>()), Times.Never);
+        hashDb.Verify(h => h.UpsertDiscographyReleaseJobsAsync(It.IsAny<string>(), It.IsAny<IEnumerable<DiscographyReleaseJobStatus>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LabelCrateCreateJobAsync_WithNoReleasesInLocalCache_RejectsAndStoresNothing()
+    {
+        var hashDb = new Mock<IHashDbService>();
+        hashDb.Setup(h => h.GetReleaseIdsByLabelAsync("Warp", It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<string>());
+        var service = new LabelCrateJobService(hashDb.Object, NullLogger<LabelCrateJobService>.Instance);
+
+        var ex = await Assert.ThrowsAsync<JobRejectedException>(() =>
+            service.CreateJobAsync(new LabelCrateJobRequest { LabelName = "Warp" }));
+
+        Assert.Contains("local MusicBrainz cache", ex.Message);
+        hashDb.Verify(h => h.UpsertLabelCrateJobAsync(It.IsAny<LabelCrateJob>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetJobAsync_WithNoReleases_IsFailedInsteadOfPendingForever()
+    {
+        var hashDb = new Mock<IHashDbService>();
+        hashDb.Setup(h => h.GetDiscographyJobAsync("job-0", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DiscographyJob { JobId = "job-0", Status = JobStatus.Pending });
+        hashDb.Setup(h => h.GetDiscographyReleaseJobsAsync("job-0", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DiscographyReleaseJobStatus>());
+        hashDb.Setup(h => h.GetLabelCrateJobAsync("job-0", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LabelCrateJob { JobId = "job-0", Status = JobStatus.Pending });
+        hashDb.Setup(h => h.GetLabelCrateReleaseJobsAsync("job-0", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DiscographyReleaseJobStatus>());
+
+        var discography = await CreateDiscographyService(hashDb).GetJobAsync("job-0");
+        var labelCrate = await new LabelCrateJobService(hashDb.Object, NullLogger<LabelCrateJobService>.Instance).GetJobAsync("job-0");
+
+        Assert.Equal(JobStatus.Failed, discography!.Status);
+        Assert.Equal(JobStatus.Failed, labelCrate!.Status);
+        hashDb.Verify(h => h.UpsertDiscographyJobAsync(It.Is<DiscographyJob>(j => j.Status == JobStatus.Failed), It.IsAny<CancellationToken>()), Times.Once);
+        hashDb.Verify(h => h.UpsertLabelCrateJobAsync(It.Is<LabelCrateJob>(j => j.Status == JobStatus.Failed), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("Artist/Album", true)]
+    [InlineData("../outside", false)]
+    [InlineData("/etc", false)]
+    public async Task DiscographyCreateJobAsync_PutsTargetDirectoryUnderDownloadsOrRejectsIt(string targetDirectory, bool allowed)
+    {
+        var hashDb = new Mock<IHashDbService>();
+        var service = CreateDiscographyService(hashDb);
+        var request = new DiscographyJobRequest { ArtistId = "artist-1", TargetDirectory = targetDirectory, ReleaseIds = new List<string> { "rel-1" } };
+
+        if (!allowed)
+        {
+            await Assert.ThrowsAsync<JobRejectedException>(() => service.CreateJobAsync(request));
+            hashDb.Verify(h => h.UpsertDiscographyJobAsync(It.IsAny<DiscographyJob>(), It.IsAny<CancellationToken>()), Times.Never);
+            return;
+        }
+
+        await service.CreateJobAsync(request);
+
+        hashDb.Verify(h => h.UpsertDiscographyJobAsync(
+            It.Is<DiscographyJob>(j => j.TargetDirectory == Path.GetFullPath(Path.Combine(Downloads, "Artist", "Album"))),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact]
     public async Task HashDbListAdapter_DelegatesBoundedPageWithoutLoadingCompleteLists()
     {
@@ -64,11 +155,7 @@ public class JobServiceAggregationTests
             .ReturnsAsync(releases);
         hashDb.Setup(service => service.UpsertDiscographyJobAsync(It.IsAny<DiscographyJob>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        var service = new DiscographyJobService(
-            Mock.Of<IDiscographyProfileService>(),
-            Mock.Of<IArtistReleaseGraphService>(),
-            hashDb.Object,
-            NullLogger<DiscographyJobService>.Instance);
+        var service = CreateDiscographyService(hashDb);
 
         var unchanged = await service.GetJobAsync("job-1");
 

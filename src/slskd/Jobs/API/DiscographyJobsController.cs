@@ -12,6 +12,10 @@ namespace slskd.Jobs.API
     using slskd.Integrations.MusicBrainz;
     using slskd.Core.Security;
 
+    /// <summary>
+    ///     Read-only legacy alias. Jobs are created by <see cref="slskd.API.Native.JobsController"/> (POST api/jobs/discography);
+    ///     a POST here would map the same route twice and fail with an ambiguous match.
+    /// </summary>
     [ApiController]
     [Route("api/jobs/discography")]
     [Route("api/v{version:apiVersion}/jobs/discography")]
@@ -26,36 +30,6 @@ namespace slskd.Jobs.API
         public DiscographyJobsController(IDiscographyJobService jobService)
         {
             this.jobService = jobService;
-        }
-
-        /// <summary>
-        ///     Creates a discography job for an artist.
-        /// </summary>
-        [HttpPost]
-        [Authorize(Policy = AuthPolicy.Any, Roles = AuthRole.ReadWriteOrAdministrator)]
-        public async Task<ActionResult<object>> Create([FromBody] DiscographyJobRequest request, CancellationToken ct)
-        {
-            if (request == null)
-            {
-                return BadRequest("artistId is required");
-            }
-
-            request.ArtistId = request.ArtistId?.Trim() ?? string.Empty;
-            request.TargetDirectory = string.IsNullOrWhiteSpace(request.TargetDirectory) ? string.Empty : request.TargetDirectory.Trim();
-            request.ReleaseIds = request.ReleaseIds?
-                .Select(id => id?.Trim() ?? string.Empty)
-                .Where(id => !string.IsNullOrWhiteSpace(id))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (string.IsNullOrWhiteSpace(request.ArtistId))
-            {
-                return BadRequest("artistId is required");
-            }
-
-            var jobId = await jobService.CreateJobAsync(request, ct).ConfigureAwait(false);
-            var job = await jobService.GetJobAsync(jobId, ct).ConfigureAwait(false);
-            return Ok(job);
         }
 
         /// <summary>

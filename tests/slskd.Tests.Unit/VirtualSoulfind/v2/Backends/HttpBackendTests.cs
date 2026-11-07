@@ -7,6 +7,7 @@ namespace slskd.Tests.Unit.VirtualSoulfind.v2.Backends
 {
     using System;
     using System.Collections.Generic;
+    using System.IO;
     using System.Net;
     using System.Net.Http;
     using System.Threading;
@@ -90,6 +91,7 @@ namespace slskd.Tests.Unit.VirtualSoulfind.v2.Backends
         {
             var options = new HttpBackendOptions
             {
+                Enabled = true,
                 DomainAllowlist = new List<string> { "allowed.com" }
             };
             var (backend, httpClient) = CreateBackend(options);
@@ -108,6 +110,54 @@ namespace slskd.Tests.Unit.VirtualSoulfind.v2.Backends
 
             Assert.False(result.IsValid);
             Assert.Contains("not in allowlist", result.InvalidityReason);
+        }
+
+        [Theory]
+        [InlineData(false, 2)]
+        [InlineData(true, 1)]
+        public async Task FindCandidates_RequireHttps_DropsPlainHttp(bool requireHttps, int expected)
+        {
+            var registry = new InMemorySourceRegistry();
+            var itemId = ContentItemId.NewId();
+            await registry.UpsertCandidateAsync(HttpCandidate("http://allowed.com/a.flac", itemId));
+            await registry.UpsertCandidateAsync(HttpCandidate("https://allowed.com/b.flac", itemId));
+            var (backend, httpClient) = CreateBackend(
+                new HttpBackendOptions { Enabled = true, DomainAllowlist = ["allowed.com"], RequireHttps = requireHttps },
+                registry: registry);
+            using var _ = httpClient;
+
+            var candidates = await backend.FindCandidatesAsync(itemId, CancellationToken.None);
+
+            Assert.Equal(expected, candidates.Count);
+            Assert.Contains(candidates, c => c.BackendRef == "https://allowed.com/b.flac");
+        }
+
+        [Fact]
+        public async Task ValidateCandidate_RequireHttps_RejectsPlainHttp()
+        {
+            var (backend, httpClient) = CreateBackend(
+                new HttpBackendOptions { Enabled = true, DomainAllowlist = ["allowed.com"], RequireHttps = true });
+            using var _ = httpClient;
+
+            var result = await backend.ValidateCandidateAsync(HttpCandidate("http://allowed.com/file.flac"), CancellationToken.None);
+
+            Assert.False(result.IsValid);
+            Assert.Equal("HTTPS required", result.InvalidityReason);
+        }
+
+        [Fact]
+        public async Task FetchToStream_RequireHttps_RejectsPlainHttp()
+        {
+            var (backend, httpClient) = CreateBackend(
+                new HttpBackendOptions { Enabled = true, DomainAllowlist = ["allowed.com"], RequireHttps = true });
+            using var _ = httpClient;
+            using var destination = new MemoryStream();
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => backend.FetchToStreamAsync(HttpCandidate("http://allowed.com/file.flac"), destination, CancellationToken.None));
+
+            Assert.Equal("HTTPS required", ex.Message);
+            Assert.Equal(0, destination.Length);
         }
 
         [Fact]
@@ -139,13 +189,23 @@ namespace slskd.Tests.Unit.VirtualSoulfind.v2.Backends
             Assert.DoesNotContain("\r\n", entry.Message);
         }
 
+        private static SourceCandidate HttpCandidate(string url, ContentItemId? itemId = null) => new()
+        {
+            Id = url,
+            ItemId = itemId ?? ContentItemId.NewId(),
+            Backend = ContentBackendType.Http,
+            BackendRef = url,
+        };
+
         private (HttpBackend Backend, HttpClient HttpClient) CreateBackend(
             HttpBackendOptions options = null,
             HttpMessageHandler handler = null,
-            ILogger<HttpBackend> logger = null)
+            ILogger<HttpBackend> logger = null,
+            ISourceRegistry registry = null)
         {
             options ??= new HttpBackendOptions
             {
+                Enabled = true,
                 DomainAllowlist = new List<string> { "allowed.com" }
             };
 
@@ -159,7 +219,7 @@ namespace slskd.Tests.Unit.VirtualSoulfind.v2.Backends
             var optionsMonitor = new Mock<IOptionsMonitor<HttpBackendOptions>>();
             optionsMonitor.Setup(o => o.CurrentValue).Returns(options);
 
-            var registry = new InMemorySourceRegistry();
+            registry ??= new InMemorySourceRegistry();
 
             return (new HttpBackend(httpFactory, optionsMonitor.Object, registry, logger), httpClient);
         }

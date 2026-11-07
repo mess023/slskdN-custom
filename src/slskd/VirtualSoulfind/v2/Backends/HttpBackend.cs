@@ -65,17 +65,22 @@ namespace slskd.VirtualSoulfind.v2.Backends
                 ContentBackendType.Http,
                 cancellationToken);
 
-            // Filter by domain allowlist
+            // Filter by enablement and domain allowlist
             var opts = _options.CurrentValue;
-            if (opts.DomainAllowlist == null || opts.DomainAllowlist.Count == 0)
+            if (!opts.Enabled || opts.DomainAllowlist == null || opts.DomainAllowlist.Count == 0)
             {
-                // If no allowlist configured, no HTTP candidates are allowed
+                // If disabled or no allowlist configured, no HTTP candidates are allowed
                 return Array.Empty<SourceCandidate>();
             }
 
             var filtered = candidates.Where(c =>
             {
                 if (!Uri.TryCreate(c.BackendRef, UriKind.Absolute, out var uri))
+                {
+                    return false;
+                }
+
+                if (opts.RequireHttps && uri.Scheme != "https")
                 {
                     return false;
                 }
@@ -116,6 +121,16 @@ namespace slskd.VirtualSoulfind.v2.Backends
 
             // Check domain allowlist
             var opts = _options.CurrentValue;
+            if (!opts.Enabled)
+            {
+                return SourceCandidateValidationResult.Invalid("HTTP backend is disabled");
+            }
+
+            if (opts.RequireHttps && uri.Scheme != "https")
+            {
+                return SourceCandidateValidationResult.Invalid("HTTPS required");
+            }
+
             if (opts.DomainAllowlist == null || opts.DomainAllowlist.Count == 0)
             {
                 return SourceCandidateValidationResult.Invalid("No allowlist configured");
@@ -199,6 +214,12 @@ namespace slskd.VirtualSoulfind.v2.Backends
                 throw new ArgumentException("Only HTTP/HTTPS allowed", nameof(candidate));
 
             var opts = _options.CurrentValue;
+            if (!opts.Enabled)
+                throw new InvalidOperationException("HTTP backend is disabled");
+
+            if (opts.RequireHttps && uri.Scheme != "https")
+                throw new InvalidOperationException("HTTPS required");
+
             if (opts.DomainAllowlist == null || opts.DomainAllowlist.Count == 0)
                 throw new InvalidOperationException("No allowlist configured");
 
@@ -263,6 +284,11 @@ namespace slskd.VirtualSoulfind.v2.Backends
         ///     Timeout for validation HEAD requests (seconds).
         /// </summary>
         public int ValidationTimeoutSeconds { get; init; } = 10;
+
+        /// <summary>
+        ///     Reject plain http:// URLs in find, validate and fetch.
+        /// </summary>
+        public bool RequireHttps { get; init; } = false;
 
         /// <summary>
         ///     Enable HTTP backend.

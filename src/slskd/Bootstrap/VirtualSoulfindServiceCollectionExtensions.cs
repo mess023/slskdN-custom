@@ -5,6 +5,7 @@ namespace slskd.Bootstrap;
 
 using System;
 using System.IO;
+using System.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -182,24 +183,63 @@ public static class VirtualSoulfindServiceCollectionExtensions
             return new Common.Moderation.WrappedOptionsMonitor<VirtualSoulfind.v2.Processing.IntentQueueProcessorOptions>(wrapped);
         });
 
-        services.AddSingleton<IOptionsMonitor<VirtualSoulfind.v2.Backends.TorrentBackendOptions>>(sp =>
+        // Backend options are derived live from slskd.Options (virtual_soulfind_v2.backends.*), so yaml edits apply without restart.
+        services.AddSingleton(sp => DeriveBackendOptions(sp, BuildTorrentBackendOptions));
+        services.AddSingleton(sp => DeriveBackendOptions(sp, root => new VirtualSoulfind.v2.Backends.SoulseekBackendOptions
         {
-            var root = sp.GetRequiredService<IOptionsMonitor<slskd.Options>>().CurrentValue.VirtualSoulfindV2;
-            var wrapped = Microsoft.Extensions.Options.Options.Create(BuildTorrentBackendOptions(root));
-            return new Common.Moderation.WrappedOptionsMonitor<VirtualSoulfind.v2.Backends.TorrentBackendOptions>(wrapped);
-        });
-
-        services.AddSingleton<IOptionsMonitor<VirtualSoulfind.v2.Backends.SoulseekBackendOptions>>(sp =>
+            Enabled = root.Enabled && root.Backends.Soulseek.Enabled,
+            SearchTimeoutSeconds = Math.Max(1, root.Backends.Soulseek.SearchTimeoutMs / 1000),
+            MinimumUploadSpeed = Math.Max(0, root.Backends.Soulseek.MinUploadSpeedBytesPerSec),
+        }));
+        services.AddSingleton(sp => DeriveBackendOptions(sp, root => new VirtualSoulfind.v2.Backends.NativeMeshBackendOptions
         {
-            var root = sp.GetRequiredService<IOptionsMonitor<slskd.Options>>().CurrentValue.VirtualSoulfindV2;
-            var wrapped = Microsoft.Extensions.Options.Options.Create(new VirtualSoulfind.v2.Backends.SoulseekBackendOptions
-            {
-                Enabled = root.Enabled,
-                SearchTimeoutSeconds = Math.Max(1, root.Backends.Soulseek.SearchTimeoutMs / 1000),
-                MinimumUploadSpeed = Math.Max(0, root.Backends.Soulseek.MinUploadSpeedBytesPerSec),
-            });
-            return new Common.Moderation.WrappedOptionsMonitor<VirtualSoulfind.v2.Backends.SoulseekBackendOptions>(wrapped);
-        });
+            Enabled = root.Enabled && root.Backends.NativeMesh.Enabled,
+            MinimumTrustScore = root.Backends.NativeMesh.MinTrustScore,
+            MaxCandidatesPerItem = Math.Max(1, root.Backends.NativeMesh.MaxCandidatesPerItem),
+        }));
+        services.AddSingleton(sp => DeriveBackendOptions(sp, root => new VirtualSoulfind.v2.Backends.MeshDhtBackendOptions
+        {
+            Enabled = root.Enabled && root.Backends.MeshDht.Enabled,
+            MinimumTrustScore = root.Backends.MeshDht.MinTrustScore,
+            MaxCandidatesPerItem = Math.Max(1, root.Backends.MeshDht.MaxCandidatesPerItem),
+        }));
+        services.AddSingleton(sp => DeriveBackendOptions(sp, root => new VirtualSoulfind.v2.Backends.HttpBackendOptions
+        {
+            Enabled = root.Enabled && root.Backends.Http.Enabled,
+            DomainAllowlist = root.Backends.Http.DomainAllowlist.ToList(),
+            MaxFileSizeBytes = root.Backends.Http.MaxFileSizeBytes,
+            ValidationTimeoutSeconds = Math.Max(1, root.Backends.Http.ValidationTimeoutSeconds),
+            RequireHttps = root.Backends.Http.RequireHttps,
+        }));
+        services.AddSingleton(sp => DeriveBackendOptions(sp, root => new VirtualSoulfind.v2.Backends.WebDavBackendOptions
+        {
+            Enabled = root.Enabled && root.Backends.WebDav.Enabled,
+            DomainAllowlist = root.Backends.WebDav.DomainAllowlist.ToList(),
+            MaxFileSizeBytes = root.Backends.WebDav.MaxFileSizeBytes,
+            ValidationTimeoutSeconds = Math.Max(1, root.Backends.WebDav.ValidationTimeoutSeconds),
+            Username = root.Backends.WebDav.Username,
+            Password = root.Backends.WebDav.Password,
+            BearerToken = root.Backends.WebDav.BearerToken,
+        }));
+        services.AddSingleton(sp => DeriveBackendOptions(sp, root => new VirtualSoulfind.v2.Backends.S3BackendOptions
+        {
+            Enabled = root.Enabled && root.Backends.S3.Enabled,
+            Endpoint = root.Backends.S3.Endpoint,
+            Region = root.Backends.S3.Region,
+            AccessKey = root.Backends.S3.AccessKey,
+            SecretKey = root.Backends.S3.SecretKey,
+            ForcePathStyle = root.Backends.S3.ForcePathStyle,
+            BucketAllowlist = root.Backends.S3.BucketAllowlist.ToList(),
+            MaxFileSizeBytes = root.Backends.S3.MaxFileSizeBytes,
+            ValidationTimeoutSeconds = Math.Max(1, root.Backends.S3.ValidationTimeoutSeconds),
+        }));
+        services.AddSingleton(sp => DeriveBackendOptions(sp, root => new VirtualSoulfind.v2.Backends.LanBackendOptions
+        {
+            Enabled = root.Enabled && root.Backends.Lan.Enabled,
+            AllowedNetworks = root.Backends.Lan.AllowedNetworks.Count > 0 ? root.Backends.Lan.AllowedNetworks.ToList() : new VirtualSoulfind.v2.Backends.LanBackendOptions().AllowedNetworks,
+            AllowedHostnames = root.Backends.Lan.AllowedHostnames.ToList(),
+            MaxCandidatesPerItem = Math.Max(1, root.Backends.Lan.MaxCandidatesPerItem),
+        }));
 
         var virtualSoulfindV2CataloguePath = Path.Combine(Program.AppDirectory, "virtualsoulfind-v2-catalogue.db");
         var virtualSoulfindV2SourcesPath = Path.Combine(Program.AppDirectory, "virtualsoulfind-v2-sources.db");
@@ -243,6 +283,14 @@ public static class VirtualSoulfindServiceCollectionExtensions
 
         return services;
     }
+
+    private static IOptionsMonitor<TOptions> DeriveBackendOptions<TOptions>(
+        IServiceProvider sp,
+        Func<VirtualSoulfind.v2.Configuration.VirtualSoulfindOptions, TOptions> map)
+        where TOptions : class
+        => new Common.Configuration.DerivedOptionsMonitor<slskd.Options, TOptions>(
+            sp.GetRequiredService<IOptionsMonitor<slskd.Options>>(),
+            options => map(options.VirtualSoulfindV2));
 
     internal static VirtualSoulfind.v2.Backends.TorrentBackendOptions BuildTorrentBackendOptions(
         VirtualSoulfind.v2.Configuration.VirtualSoulfindOptions root)

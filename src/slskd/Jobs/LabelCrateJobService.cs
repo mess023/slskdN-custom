@@ -41,6 +41,11 @@ namespace slskd.Jobs
             var limit = request.Limit <= 0 ? 10 : request.Limit;
             var labelNameOrId = request.LabelName ?? request.LabelId ?? string.Empty;
             var releases = await hashDb.GetReleaseIdsByLabelAsync(labelNameOrId, limit, ct).ConfigureAwait(false);
+            if (releases.Count == 0)
+            {
+                throw new JobRejectedException(
+                    "No releases for this label in the local MusicBrainz cache. Label crates match label names (not MBIDs) of releases slskdN already resolved through MusicBrainz.");
+            }
 
             var job = new LabelCrateJob
             {
@@ -94,7 +99,7 @@ namespace slskd.Jobs
 
             var totalReleases = releaseStatuses.Count;
             var status = totalReleases == 0
-                ? JobStatus.Pending
+                ? JobStatus.Failed // nothing to run, ever (creation refuses this now; older jobs end here)
                 : completedReleases == totalReleases
                     ? JobStatus.Completed
                     : failedReleases > 0 && !anyRunning && !anyPending

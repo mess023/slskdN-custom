@@ -11,7 +11,9 @@ import FeatureGateNotice from '../../Shared/FeatureGateNotice';
 import useFeatureGates, { isFeatureEnabled } from '../../Shared/useFeatureGates';
 import { formatBytes } from '../../../lib/util';
 import SwarmVisualization from '../SwarmVisualization';
+import NewJobModal from './NewJobModal';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import {
   Button,
@@ -554,6 +556,7 @@ const Jobs = () => {
                 <LocalizedText source={"Refresh"} /></Button>
             )}
            {...interfaceTextProps("Reload the current job list after job status or page data changes.")}/>
+          <NewJobModal onCreated={fetchJobs} />
         </div>
 
         {loading ? (
@@ -565,8 +568,19 @@ const Jobs = () => {
           <Segment placeholder>
             <Header icon>
               <Icon name="inbox" />
-              <LocalizedText source={"No jobs found"} /></Header>
-            <p><LocalizedText source={"No jobs match the current filters."} /></p>
+              <LocalizedText source={"No jobs yet"} /></Header>
+            {(filters.status || filters.type) && (
+              <p><LocalizedText source={"No jobs match the current filters."} /></p>
+            )}
+            <p>
+              <LocalizedText source={"Jobs are download plans for a whole discography, a single album, or a label crate (a batch of releases from one record label)."} />{' '}
+              <LocalizedText source={"Create one with New job above, or from Search → SongID."} />
+            </p>
+            <Popup
+              content={interfaceText("Open Search, where SongID can also plan album and discography jobs.")}
+              position="top center"
+              trigger={<Link to="/searches"><LocalizedText source={"Go to Search"} /></Link>}
+            />
           </Segment>
         ) : (
           <>

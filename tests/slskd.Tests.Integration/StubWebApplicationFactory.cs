@@ -193,15 +193,13 @@ public class StubWebApplicationFactory : WebApplicationFactory<ProgramStub>
                         .AddApplicationPart(typeof(global::slskd.Users.Notes.API.UserNotesController).Assembly)
                         .ConfigureApplicationPartManager(manager =>
                         {
-                            // Exclude conflicting controllers - use JobsController instead
+                            // Every controller, as in production: hiding one here once hid an ambiguous route (HTTP 500).
                             var existingProvider = manager.FeatureProviders.OfType<ControllerFeatureProvider>().FirstOrDefault();
                             if (existingProvider != null)
                             {
                                 manager.FeatureProviders.Remove(existingProvider);
                             }
-                            manager.FeatureProviders.Add(new ExcludeControllerFeatureProvider(
-                                typeof(global::slskd.Jobs.API.DiscographyJobsController),
-                                typeof(global::slskd.Jobs.API.LabelCrateJobsController)));
+                            manager.FeatureProviders.Add(new ExcludeControllerFeatureProvider());
                         })
                         .AddApplicationPart(typeof(SearchCompatibilityController).Assembly)
                         .AddApplicationPart(typeof(global::slskd.API.VirtualSoulfind.DisasterModeController).Assembly);

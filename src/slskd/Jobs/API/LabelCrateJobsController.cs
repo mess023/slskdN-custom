@@ -11,6 +11,10 @@ namespace slskd.Jobs.API
     using slskd.Authentication;
     using slskd.Core.Security;
 
+    /// <summary>
+    ///     Read-only legacy alias. Jobs are created by <see cref="slskd.API.Native.JobsController"/> (POST api/jobs/label-crate);
+    ///     a POST here would map the same route twice and fail with an ambiguous match.
+    /// </summary>
     [ApiController]
     [Route("api/jobs/label-crate")]
     [Route("api/v{version:apiVersion}/jobs/label-crate")]
@@ -25,31 +29,6 @@ namespace slskd.Jobs.API
         public LabelCrateJobsController(ILabelCrateJobService jobService)
         {
             this.jobService = jobService;
-        }
-
-        /// <summary>
-        ///     Creates a label crate job.
-        /// </summary>
-        [HttpPost]
-        [Authorize(Policy = AuthPolicy.Any, Roles = AuthRole.ReadWriteOrAdministrator)]
-        public async Task<ActionResult<object>> Create([FromBody] LabelCrateJobRequest request, CancellationToken ct)
-        {
-            if (request == null)
-            {
-                return BadRequest("labelId or labelName is required");
-            }
-
-            request.LabelId = string.IsNullOrWhiteSpace(request.LabelId) ? null : request.LabelId.Trim();
-            request.LabelName = string.IsNullOrWhiteSpace(request.LabelName) ? null : request.LabelName.Trim();
-
-            if (string.IsNullOrWhiteSpace(request.LabelId) && string.IsNullOrWhiteSpace(request.LabelName))
-            {
-                return BadRequest("labelId or labelName is required");
-            }
-
-            var jobId = await jobService.CreateJobAsync(request, ct).ConfigureAwait(false);
-            var job = await jobService.GetJobAsync(jobId, ct).ConfigureAwait(false);
-            return Ok(job);
         }
 
         /// <summary>

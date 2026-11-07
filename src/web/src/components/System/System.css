@@ -320,6 +320,24 @@
   margin-top: 6px;
 }
 
+.source-provider-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.source-provider-config-key {
+  color: var(--slskd-color-subtle, rgba(0, 0, 0, 0.55));
+  margin: 0 0 12px;
+}
+
+.source-provider-field {
+  margin-bottom: 1em;
+}
+
 .automation-summary.ui.statistics {
   margin: 0 !important;
 }
@@ -1108,4 +1126,60 @@
     justify-content: center;
     width: 100%;
   }
+}
+
+.automation-template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.automation-template-option {
+  border: 1px solid var(--slskd-color-border, rgba(34, 36, 38, 0.15));
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.automation-template-option .automation-recipe-labels {
+  margin-top: 6px;
+}
+
+.automation-form-section {
+  display: block;
+  font-weight: 700;
+  margin: 1em 0 0.5em;
+}
+
+.automation-last-run {
+  margin-top: 12px;
+}
+
+.automation-run-summary {
+  margin: 6px 0 0;
+}
+
+.automation-run-details {
+  font-size: 0.86rem;
+  margin-top: 6px;
+}
+
+.automation-run-details pre {
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.automation-run-details ul {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+}
+
+.automation-linked-options {
+  border-top: 1px solid var(--slskd-color-border, rgba(34, 36, 38, 0.15));
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.automation-linked-options .ui.form {
+  margin-top: 8px;
 }

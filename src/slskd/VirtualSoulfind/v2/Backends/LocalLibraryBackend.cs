@@ -8,6 +8,7 @@ namespace slskd.VirtualSoulfind.v2.Backends
     using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
+    using Microsoft.Extensions.Options;
     using slskd.MediaCore;
     using slskd.Shares;
     using slskd.VirtualSoulfind.Core;
@@ -29,18 +30,22 @@ namespace slskd.VirtualSoulfind.v2.Backends
     {
         private readonly IShareRepository _shareRepository;
         private readonly IContentIdRegistry _contentIdRegistry;
+        private readonly IOptionsMonitor<slskd.Options>? _options;
 
         /// <summary>
         ///     Initializes a new instance of the <see cref="LocalLibraryBackend"/> class.
         /// </summary>
         /// <param name="shareRepository">The share repository.</param>
         /// <param name="contentIdRegistry">The content ID registry.</param>
+        /// <param name="options">Application options; <c>virtual_soulfind_v2.backends.local_library.enabled</c> gates this backend. Null means always enabled.</param>
         public LocalLibraryBackend(
             IShareRepository shareRepository,
-            IContentIdRegistry contentIdRegistry)
+            IContentIdRegistry contentIdRegistry,
+            IOptionsMonitor<slskd.Options>? options = null)
         {
             _shareRepository = shareRepository ?? throw new ArgumentNullException(nameof(shareRepository));
             _contentIdRegistry = contentIdRegistry ?? throw new ArgumentNullException(nameof(contentIdRegistry));
+            _options = options;
         }
 
         /// <inheritdoc/>
@@ -54,6 +59,12 @@ namespace slskd.VirtualSoulfind.v2.Backends
             ContentItemId itemId,
             CancellationToken cancellationToken = default)
         {
+            var v2 = _options?.CurrentValue.VirtualSoulfindV2;
+            if (v2 is not null && !(v2.Enabled && v2.Backends.LocalLibrary.Enabled))
+            {
+                return Array.Empty<SourceCandidate>();
+            }
+
             var contentIdStr = await ResolveContentIdAsync(itemId, cancellationToken);
             if (string.IsNullOrWhiteSpace(contentIdStr))
             {
