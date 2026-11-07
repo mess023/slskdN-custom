@@ -211,6 +211,57 @@ describe('Wishlist', () => {
     expect(wishlistAPI.remove).not.toHaveBeenCalled();
   });
 
+  it('badges album and discography mode with the real Soulseek search text in table and card views', async () => {
+    wishlistAPI.getAll.mockResolvedValue([
+      {
+        autoDownload: true,
+        enabled: true,
+        id: 'wish-album',
+        searchMode: 'album',
+        searchText: 'artist title album',
+        soulseekSearchText: 'artist title',
+        totalSearchCount: 0,
+      },
+      {
+        autoDownload: true,
+        enabled: true,
+        id: 'wish-discography',
+        searchMode: 'discography',
+        searchText: 'artist discography',
+        soulseekSearchText: 'artist discography',
+        totalSearchCount: 0,
+      },
+      {
+        autoDownload: true,
+        enabled: true,
+        id: 'wish-track',
+        searchMode: 'track',
+        searchText: 'artist song',
+        soulseekSearchText: 'artist song',
+        totalSearchCount: 0,
+      },
+    ]);
+    renderWishlist();
+
+    const albumTooltip = 'Album mode: the search ended with "album". Soulseek is searched for "artist title". Downloads the complete best album folder (one user, one folder), audio files only (wishlist.filter). wishlist.max_downloads does not apply.';
+    const discographyTooltip = 'Discography mode: the search ended with "discography". Soulseek is searched for "artist discography". Downloads the complete best discography folder (one user, all subfolders), audio files only (wishlist.filter). wishlist.max_downloads does not apply.';
+    const expectBadges = async () => {
+      const badges = [...document.querySelectorAll('.wishlist-search-mode')];
+      expect(badges.map((badge) => badge.textContent)).toEqual(['Album', 'Discography']);
+      for (const [badge, tooltip] of [[badges[0], albumTooltip], [badges[1], discographyTooltip]]) {
+        fireEvent.mouseEnter(badge);
+        expect(await screen.findByText(tooltip)).toBeInTheDocument();
+        fireEvent.mouseLeave(badge);
+      }
+    };
+
+    expect(await screen.findByText('artist title album')).toBeInTheDocument();
+    await expectBadges();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show wishlist as cards' }));
+    await expectBadges();
+  });
+
   it('explains add and bulk-filter modal actions without running them on hover', async () => {
     wishlistAPI.getAll.mockResolvedValue([
       {

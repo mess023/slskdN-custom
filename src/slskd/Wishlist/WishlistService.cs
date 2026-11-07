@@ -838,14 +838,14 @@ namespace slskd.Wishlist
             Log.Information("Executing wishlist search: {SearchText}", item.SearchText);
 
             var searchId = Guid.NewGuid();
-            var query = new SearchQuery(item.SearchText);
+            var query = new SearchQuery(item.SoulseekSearchText);
             var scope = SearchScope.Network;
 
             var itemFileFilter = CreateFileFilter(item.Filter);
             var globalSoulseekFileFilter = CreateFileFilter(GlobalFilter);
             Func<Soulseek.File, bool> userFileFilter = file => itemFileFilter(file) && globalSoulseekFileFilter(file);
             var wishlistFileFilter = WishlistSearchPolicy.CreateSoulseekFileFilter(
-                item.SearchText,
+                item.SoulseekSearchText,
                 userFileFilter);
             var searchOptions = new SearchOptions(
                 searchTimeout: 15000,
@@ -886,7 +886,7 @@ namespace slskd.Wishlist
 
             var hitStats = CountWishlistHits(
                 searchWithResponses,
-                item.SearchText,
+                item.SoulseekSearchText,
                 item.Filter,
                 ignoredResults,
                 blockedUsers,
@@ -938,7 +938,8 @@ namespace slskd.Wishlist
 
                     // Auto-disable when MaxDownloads limit is reached.
                     // When MaxDownloads is null, disable after the first auto-download (legacy behavior).
-                    var shouldDisable = item.MaxDownloads == null
+                    // Album and discography items download one complete folder and are done.
+                    var shouldDisable = item.MaxDownloads == null || item.SearchMode != "track"
                         ? true
                         : item.TotalDownloadCount >= item.MaxDownloads.Value;
 
@@ -982,11 +983,17 @@ namespace slskd.Wishlist
             {
                 var wishlistItemId = item.Id;
                 var filter = item.Filter;
-                var remainingDownloads = Math.Min(
-                    item.MaxDownloads.HasValue
-                        ? item.MaxDownloads.Value - item.TotalDownloadCount
-                        : int.MaxValue,
-                    GlobalMaxDownloads - item.TotalDownloadCount);
+                var mode = item.SearchMode;
+                var isDiscography = mode == "discography";
+
+                // Album/discography items take the complete best folder: max_downloads (item and global) do not apply.
+                var remainingDownloads = mode != "track"
+                    ? int.MaxValue
+                    : Math.Min(
+                        item.MaxDownloads.HasValue
+                            ? item.MaxDownloads.Value - item.TotalDownloadCount
+                            : int.MaxValue,
+                        GlobalMaxDownloads - item.TotalDownloadCount);
                 if (remainingDownloads <= 0)
                 {
                     return WishlistDownloadResult.Empty;
@@ -995,9 +1002,9 @@ namespace slskd.Wishlist
                 var itemResultFileFilter = CreateSearchResultFileFilter(filter);
                 var globalResultFileFilter = CreateSearchResultFileFilter(GlobalFilter);
                 var fileFilter = WishlistSearchPolicy.CreateResultFileFilter(
-                    item.SearchText,
+                    item.SoulseekSearchText,
                     file => itemResultFileFilter(file) && globalResultFileFilter(file));
-                var alreadyDownloaded = await GetRecentlyCompletedTrackKeysAsync(item.SearchText, cancellationToken)
+                var alreadyDownloaded = await GetRecentlyCompletedTrackKeysAsync(item.SoulseekSearchText, cancellationToken)
                     .ConfigureAwait(false);
 
                 var candidates = new List<SourceCandidate>();
@@ -1038,13 +1045,15 @@ namespace slskd.Wishlist
                     return WishlistDownloadResult.Empty;
                 }
 
-                // Group by (user, directory) so we can download a complete album at once.
+                // Group by (user, directory) so we can download a complete album at once; a discography groups by
+                // (user, discography root) so every subfolder comes along.
                 // Rank one representative file per group (peer-level stats are the same for all).
+                Func<string, string> groupDirectory = isDiscography ? GetDiscographyRoot : GetParentDirectory;
                 var filterTerms = ParseFilterTerms(filter);
                 var editionExpectation = BuildEditionExpectation(item);
                 var groupPlans = candidates
-                    .GroupBy(c => (c.Username, Dir: GetParentDirectory(c.Filename)))
-                    .Select(group => BuildGroupPlan(group.Key, group, filterTerms, remainingDownloads, editionExpectation))
+                    .GroupBy(c => (c.Username, Dir: groupDirectory(c.Filename)))
+                    .Select(group => BuildGroupPlan(group.Key, group, filterTerms, remainingDownloads, editionExpectation, keepEveryPath: isDiscography))
                     .ToList();
                 var ranked = await RankingService.RankSourcesAsync(
                     groupPlans.Select(plan => plan.Representative),
@@ -1052,10 +1061,10 @@ namespace slskd.Wishlist
 
                 var groupPlansByKey = groupPlans.ToDictionary(plan => plan.Key);
                 var rankedPlans = ranked
-                    .Where(rep => groupPlansByKey.ContainsKey((rep.Username, GetParentDirectory(rep.Filename))))
+                    .Where(rep => groupPlansByKey.ContainsKey((rep.Username, groupDirectory(rep.Filename))))
                     .Select(rep => new
                     {
-                        Plan = groupPlansByKey[(rep.Username, GetParentDirectory(rep.Filename))],
+                        Plan = groupPlansByKey[(rep.Username, groupDirectory(rep.Filename))],
                         Ranked = rep,
                     })
                     .ToList();
@@ -1087,7 +1096,8 @@ namespace slskd.Wishlist
                     return WishlistDownloadResult.Empty;
                 }
 
-                if (bestPlan.Plan.Files.Count > MaximumAutomaticDownloadsPerSearch)
+                // A discography is many albums by design: the per-search safety limit does not apply to it.
+                if (!isDiscography && bestPlan.Plan.Files.Count > MaximumAutomaticDownloadsPerSearch)
                 {
                     Log.Warning(
                         "Skipping wishlist auto-download from {Username} in {Directory}: release candidate contains {Count} files, above the safety limit of {Limit}",
@@ -1119,11 +1129,13 @@ namespace slskd.Wishlist
                     return WishlistDownloadResult.Empty;
                 }
 
-                var finalRemainingDownloads = Math.Min(
-                    latestState.MaxDownloads.HasValue
-                        ? latestState.MaxDownloads.Value - latestState.TotalDownloadCount
-                        : int.MaxValue,
-                    GlobalMaxDownloads - latestState.TotalDownloadCount);
+                var finalRemainingDownloads = mode != "track"
+                    ? int.MaxValue
+                    : Math.Min(
+                        latestState.MaxDownloads.HasValue
+                            ? latestState.MaxDownloads.Value - latestState.TotalDownloadCount
+                            : int.MaxValue,
+                        GlobalMaxDownloads - latestState.TotalDownloadCount);
                 if (finalRemainingDownloads <= 0)
                 {
                     return WishlistDownloadResult.Empty;
@@ -1153,14 +1165,15 @@ namespace slskd.Wishlist
                         WishlistItemId = wishlistItemId,
                         DestinationDirectory = item.DestinationDirectory, // a job's target directory; null = default
                     })
-                    .Take(Math.Min(finalRemainingDownloads, MaximumAutomaticDownloadsPerSearch))
+                    .Take(isDiscography ? int.MaxValue : Math.Min(finalRemainingDownloads, MaximumAutomaticDownloadsPerSearch))
                     .ToList();
 
                 var bestDir = bestPlan.Plan.Key.Dir;
 
                 Log.Information(
-                    "Auto-downloading {Count} file(s) from {Username} in {Directory} (coverage: {Coverage}, score: {Score:F1})",
+                    "Auto-downloading {Count} file(s) ({Mode} mode) from {Username} in {Directory} (coverage: {Coverage}, score: {Score:F1})",
                     filesToDownload.Count,
+                    mode,
                     bestPlan.Plan.Key.Username,
                     bestDir,
                     bestPlan.Plan.Coverage,
@@ -1192,15 +1205,28 @@ namespace slskd.Wishlist
             return lastSlash < 0 ? string.Empty : normalized[..lastSlash];
         }
 
+        /// <summary>
+        ///     The path up to and including the first folder whose name contains "discography"; the parent directory
+        ///     when no folder does.
+        /// </summary>
+        internal static string GetDiscographyRoot(string filename)
+        {
+            var segments = GetParentDirectory(filename).Split('/');
+            var index = Array.FindIndex(segments, segment => segment.Contains("discography", StringComparison.OrdinalIgnoreCase));
+            return string.Join('/', index < 0 ? segments : segments[..(index + 1)]);
+        }
+
         private static WishlistGroupPlan BuildGroupPlan(
             (string Username, string Dir) key,
             IEnumerable<SourceCandidate> candidates,
             WishlistFilterTerms filterTerms,
             int remainingDownloads,
-            WishlistEditionExpectation? edition)
+            WishlistEditionExpectation? edition,
+            bool keepEveryPath = false)
         {
+            // A discography spans folders, so tracks are told apart by full path instead of by name.
             var rankedPerTrack = candidates
-                .GroupBy(GetTrackIdentity, StringComparer.OrdinalIgnoreCase)
+                .GroupBy(candidate => keepEveryPath ? candidate.Filename : GetTrackIdentity(candidate), StringComparer.OrdinalIgnoreCase)
                 .Select(group => group
                     .Select(candidate => (Candidate: candidate, Quality: GetQualityKey(candidate, filterTerms)))
                     .OrderByDescending(ranked => ranked.Quality)

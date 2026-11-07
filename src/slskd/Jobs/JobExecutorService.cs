@@ -20,7 +20,8 @@ namespace slskd.Jobs
 
     /// <summary>
     ///     Drives discography and label-crate jobs by handing each release to the Wishlist.
-    ///     Pending release -> its own wishlist item (auto-download, no item filter so wishlist.filter decides the formats,
+    ///     Pending release -> its own album-mode wishlist item ("&lt;artist&gt; &lt;title&gt; album": the complete best album
+    ///     folder; auto-download, no item filter so wishlist.filter decides the formats,
     ///     <see cref="WishlistItem.JobId"/> = "&lt;jobId&gt;:&lt;releaseId&gt;", the job's target directory) -> Running.
     ///     Running release -> Completed once its item enqueued a download; Failed after <see cref="MaxSearchAttempts"/>
     ///     searches without one (judged <see cref="SearchSettleTime"/> after the last search), or when the user deleted or
@@ -159,6 +160,16 @@ namespace slskd.Jobs
         private static bool SameText(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
+        ///     The item's search text: the release text in album mode (see <see cref="WishlistItem.SearchMode"/>).
+        /// </summary>
+        private static string AlbumText(string text) => $"{text} album";
+
+        /// <summary>
+        ///     The release text of an item's search text, without the album-mode suffix.
+        /// </summary>
+        private static string Bare(string itemText) => itemText.EndsWith(" album", StringComparison.OrdinalIgnoreCase) ? itemText[..^6] : itemText;
+
+        /// <summary>
         ///     True when <paramref name="itemText"/> is <paramref name="text"/>, with or without a year that an earlier cycle appended.
         /// </summary>
         private static bool SameAlbum(string itemText, string text)
@@ -236,19 +247,19 @@ namespace slskd.Jobs
                 .Where(i => i.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && IsUsable(i.Value) && !resolved.ContainsKey(i.Key[prefix.Length..]))
                 .ToList();
             var duplicates = resolved
-                .Where(r => resolved.Any(o => o.Key != r.Key && SameText(o.Value.Text, r.Value.Text)) || siblings.Any(s => SameAlbum(s.Value.SearchText, r.Value.Text)))
+                .Where(r => resolved.Any(o => o.Key != r.Key && SameText(o.Value.Text, r.Value.Text)) || siblings.Any(s => SameAlbum(Bare(s.Value.SearchText), r.Value.Text)))
                 .ToList();
             foreach (var (releaseId, value) in duplicates)
             {
                 resolved[releaseId] = ($"{value.Text} {value.Year}".Trim(), value.Year);
             }
 
-            foreach (var (key, sibling) in siblings.Where(s => s.Value.TotalDownloadCount == 0 && duplicates.Any(d => SameText(d.Value.Text, s.Value.SearchText))))
+            foreach (var (key, sibling) in siblings.Where(s => s.Value.TotalDownloadCount == 0 && duplicates.Any(d => SameText(d.Value.Text, Bare(s.Value.SearchText)))))
             {
                 var year = Year((await hashDb.GetAlbumTargetAsync(key[prefix.Length..], ct).ConfigureAwait(false))?.ReleaseDate);
                 if (year.Length > 0)
                 {
-                    sibling.SearchText = $"{sibling.SearchText} {year}";
+                    sibling.SearchText = AlbumText($"{Bare(sibling.SearchText)} {year}");
                     await wishlist.UpdateAsync(sibling).ConfigureAwait(false);
                 }
             }
@@ -310,7 +321,7 @@ namespace slskd.Jobs
                 {
                     items[key] = await wishlist.CreateAsync(new WishlistItem
                     {
-                        SearchText = resolved[release.ReleaseId].Text,
+                        SearchText = AlbumText(resolved[release.ReleaseId].Text),
                         Enabled = true,
                         AutoDownload = true,
                         JobId = key,
@@ -333,8 +344,8 @@ namespace slskd.Jobs
                 return JobStatus.Failed; // removed by the user
             }
 
-            // ponytail: wishlist.max_downloads also caps album items (1 = one file), so Completed means "queued at least one
-            // file". The max_downloads/album decision lands here and in WishlistService.AutoDownloadBestResultsAsync.
+            // An album-mode item queues its whole album plan (one user, one folder) in a single auto-download, without
+            // wishlist.max_downloads: any queued file means the album is queued.
             if (item.TotalDownloadCount > 0)
             {
                 return JobStatus.Completed;

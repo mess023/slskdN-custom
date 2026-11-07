@@ -1091,6 +1091,222 @@ public class WishlistControllerTests : IDisposable
         Assert.Equal(1, item.LastFilteredOutHitCount);
     }
 
+    [Theory]
+    [InlineData("Artist Title album", "album", "Artist Title")]
+    [InlineData("Artist Title ALBUM", "album", "Artist Title")]
+    [InlineData("Artist Title album.", "album", "Artist Title")]
+    [InlineData("Artist Title - (album)", "album", "Artist Title")]
+    [InlineData("The White Album", "album", "The White")] // the rule is the last word, whatever the title
+    [InlineData("album", "track", "album")] // nothing left to search for
+    [InlineData("  album!  ", "track", "album!")]
+    [InlineData("- album", "track", "- album")]
+    [InlineData("Artist -album", "track", "Artist -album")] // an exclusion, not a mode
+    [InlineData("Album Artist Title", "track", "Album Artist Title")]
+    [InlineData("Artist albums", "track", "Artist albums")]
+    [InlineData("Artist Discography", "discography", "Artist discography")]
+    [InlineData("Artist discography!", "discography", "Artist discography")]
+    [InlineData("discography", "track", "discography")]
+    [InlineData("", "track", "")]
+    public void SearchMode_IsDerivedFromTheLastWordOfTheSearchText(string searchText, string mode, string soulseekText)
+    {
+        var item = new WishlistItem { SearchText = searchText };
+
+        Assert.Equal(mode, item.SearchMode);
+        Assert.Equal(soulseekText, item.SoulseekSearchText);
+    }
+
+    [Fact]
+    public void WishlistItemJson_CarriesTheSearchModeAndSoulseekSearchText()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            new WishlistItem { SearchText = "Artist Title album" },
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+
+        Assert.Contains("\"searchMode\":\"album\"", json);
+        Assert.Contains("\"soulseekSearchText\":\"Artist Title\"", json);
+    }
+
+    [Fact]
+    public async Task RunSearch_InAlbumMode_DownloadsTheCompleteBestFolderDespiteMaxDownloadsOne()
+    {
+        var itemId = Guid.NewGuid();
+        await using (var context = _contextFactory.CreateDbContext())
+        {
+            context.WishlistItems.Add(new WishlistItem
+            {
+                Id = itemId,
+                SearchText = "artist title album",
+                AutoDownload = true,
+                Enabled = true,
+                MaxDownloads = 1,
+            });
+            await context.SaveChangesAsync();
+        }
+
+        // No path contains "album": the word only selects the mode.
+        var searchService = CreateCompletedSearchService(itemId, new List<Response>
+        {
+            new()
+            {
+                Username = "alice",
+                HasFreeUploadSlot = true,
+                UploadSpeed = 1000,
+                Files =
+                [
+                    new slskd.Search.File { Filename = @"Music\Artist Title [FLAC]\cover.jpg", Size = 50 },
+                    new slskd.Search.File { Filename = @"Music\Artist Title [FLAC]\01 Song.flac", Size = 100 },
+                    new slskd.Search.File { Filename = @"Music\Artist Title [FLAC]\02 Song.flac", Size = 200 },
+                    new slskd.Search.File { Filename = @"Music\Artist Title [FLAC]\03 Song.flac", Size = 300 },
+                ],
+            },
+            new()
+            {
+                Username = "bob",
+                HasFreeUploadSlot = true,
+                UploadSpeed = 1000,
+                Files = [new slskd.Search.File { Filename = @"Music\Artist Title single\01 Song.flac", Size = 100 }],
+            },
+        });
+        var (service, enqueued) = CreateAutoDownloadService(searchService, new slskd.Options.WishlistOptions { Filter = ".flac", MaxDownloads = 1 });
+
+        await service.RunSearchAsync(itemId);
+
+        searchService.Verify(s => s.StartAsync(
+            It.IsAny<Guid>(),
+            It.Is<SearchQuery>(q => q.SearchText == "artist title"),
+            It.IsAny<SearchScope>(),
+            It.IsAny<SearchOptions?>(),
+            It.IsAny<List<string>?>(),
+            It.IsAny<string>(),
+            It.IsAny<Guid?>()));
+        Assert.Equal("alice", Assert.Single(enqueued).Username);
+        Assert.Equal(
+            new[] { "01 Song.flac", "02 Song.flac", "03 Song.flac" },
+            enqueued.Single().Files.Select(f => Path.GetFileName(f.Replace('\\', '/'))).Order());
+        await using var verifyContext = _contextFactory.CreateDbContext();
+        var item = await verifyContext.WishlistItems.FindAsync(itemId);
+        Assert.False(item!.Enabled);
+        Assert.Equal(3, item.TotalDownloadCount);
+    }
+
+    [Fact]
+    public async Task RunSearch_InDiscographyMode_DownloadsEverySubfolderOfTheBestRoot()
+    {
+        var itemId = Guid.NewGuid();
+        await using (var context = _contextFactory.CreateDbContext())
+        {
+            context.WishlistItems.Add(new WishlistItem
+            {
+                Id = itemId,
+                SearchText = "artist discography",
+                AutoDownload = true,
+                Enabled = true,
+            });
+            await context.SaveChangesAsync();
+        }
+
+        var searchService = CreateCompletedSearchService(itemId, new List<Response>
+        {
+            new()
+            {
+                Username = "alice",
+                HasFreeUploadSlot = true,
+                UploadSpeed = 1000,
+                Files =
+                [
+                    new slskd.Search.File { Filename = @"Music\Artist Discography\1994 - First\cover.jpg", Size = 50 },
+                    new slskd.Search.File { Filename = @"Music\Artist Discography\1994 - First\01 Intro.flac", Size = 100 },
+                    new slskd.Search.File { Filename = @"Music\Artist Discography\1994 - First\02 Song.flac", Size = 200 },
+                    new slskd.Search.File { Filename = @"Music\Artist Discography\1996 - Second\CD1\01 Intro.flac", Size = 300 },
+                ],
+            },
+            new()
+            {
+                Username = "bob",
+                HasFreeUploadSlot = true,
+                UploadSpeed = 1000,
+                Files =
+                [
+                    new slskd.Search.File { Filename = @"Music\Artist Discography (partial)\2001\01 Song.flac", Size = 100 },
+                    new slskd.Search.File { Filename = @"Music\Artist Discography (partial)\2001\02 Song.flac", Size = 100 },
+                ],
+            },
+        });
+        var (service, enqueued) = CreateAutoDownloadService(searchService, new slskd.Options.WishlistOptions { Filter = ".flac", MaxDownloads = 1 });
+
+        await service.RunSearchAsync(itemId);
+
+        searchService.Verify(s => s.StartAsync(
+            It.IsAny<Guid>(),
+            It.Is<SearchQuery>(q => q.SearchText == "artist discography"),
+            It.IsAny<SearchScope>(),
+            It.IsAny<SearchOptions?>(),
+            It.IsAny<List<string>?>(),
+            It.IsAny<string>(),
+            It.IsAny<Guid?>()));
+        Assert.Equal("alice", Assert.Single(enqueued).Username);
+        Assert.Equal(
+            new[]
+            {
+                @"Music\Artist Discography\1994 - First\01 Intro.flac",
+                @"Music\Artist Discography\1994 - First\02 Song.flac",
+                @"Music\Artist Discography\1996 - Second\CD1\01 Intro.flac",
+            },
+            enqueued.Single().Files.Order());
+        await using var verifyContext = _contextFactory.CreateDbContext();
+        Assert.False((await verifyContext.WishlistItems.FindAsync(itemId))!.Enabled);
+    }
+
+    [Theory]
+    [InlineData(@"Music\Artist Discography\1994\CD1\01.flac", "Music/Artist Discography")]
+    [InlineData(@"Music\ARTIST - DISCOGRAPHY 1990-2000\01.flac", "Music/ARTIST - DISCOGRAPHY 1990-2000")]
+    [InlineData(@"Music\Artist\01 discography.flac", "Music/Artist")]
+    public void GetDiscographyRoot_EndsAtTheFirstDiscographyFolder(string filename, string root)
+    {
+        Assert.Equal(root, WishlistService.GetDiscographyRoot(filename));
+    }
+
+    private (WishlistService Service, List<(string Username, List<string> Files)> Enqueued) CreateAutoDownloadService(
+        Mock<ISearchService> searchService,
+        slskd.Options.WishlistOptions wishlistOptions)
+    {
+        var rankingService = new Mock<ISourceRankingService>();
+        rankingService
+            .Setup(service => service.RankSourcesAsync(It.IsAny<IEnumerable<SourceCandidate>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<SourceCandidate> candidates, CancellationToken cancellationToken) =>
+                candidates.Select(candidate => new RankedSource
+                {
+                    Username = candidate.Username,
+                    Filename = candidate.Filename,
+                    Size = candidate.Size,
+                    SmartScore = 10,
+                }));
+        var enqueued = new List<(string Username, List<string> Files)>();
+        var downloadService = new Mock<IDownloadService>();
+        downloadService
+            .Setup(service => service.EnqueueAsync(
+                It.IsAny<string>(),
+                It.IsAny<IEnumerable<slskd.Transfers.Downloads.DownloadEnqueueRequest>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string username, IEnumerable<slskd.Transfers.Downloads.DownloadEnqueueRequest> requests, CancellationToken cancellationToken) =>
+            {
+                var files = requests.Select(request => request.Filename).ToList();
+                enqueued.Add((username, files));
+                return (
+                    files.Select(file => new slskd.Transfers.Transfer { Id = Guid.NewGuid(), Username = username, Filename = file }).ToList(),
+                    new List<string>());
+            });
+        var service = new WishlistService(
+            _contextFactory,
+            Mock.Of<IDbContextFactory<slskd.Transfers.TransfersDbContext>>(),
+            searchService.Object,
+            Mock.Of<ISoulseekClient>(),
+            new TestOptionsMonitor<slskd.Options>(new slskd.Options { Wishlist = wishlistOptions }),
+            rankingService.Object,
+            downloadService.Object);
+        return (service, enqueued);
+    }
+
     [Fact]
     public async Task RunSearch_WhenAutoDownloadLimitIsOne_EnqueuesOnlyOneFile()
     {

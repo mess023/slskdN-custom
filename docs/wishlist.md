@@ -21,6 +21,31 @@ When auto-download is enabled:
 
 - **Default (Max Downloads blank)**: The item is disabled after the first successful download. This is "one-shot" behavior — useful for finding a specific album.
 - **Max Downloads set (e.g., 5)**: The item stays enabled until the total download count reaches that number. Useful for multi-part releases where each search finds one piece.
+- **Album or discography mode**: The item is disabled after its one complete folder was queued (see below).
+
+## Album and Discography Mode
+
+The last word of the search text (case-insensitive, punctuation around it ignored) picks how much one item downloads.
+It needs at least one other word in front of it; `album` alone is an ordinary search.
+
+| Search text ends with | Soulseek is searched for | Auto-download takes |
+|---|---|---|
+| anything else | the text as typed | at most `wishlist.max_downloads` / Max Downloads files |
+| `album` (`Artist Title album`) | the text without `album` (`Artist Title`) | the complete best album folder: one user, one folder |
+| `discography` (`Artist discography`) | the text as typed, `discography` included | the complete best discography folder: one user, the first folder whose name contains "discography", with all its subfolders |
+
+- `wishlist.max_downloads` and the item's Max Downloads do not apply to album and discography items; the item is
+  disabled once the folder is queued.
+- `wishlist.filter` and the item's filter still apply, so only the audio files of the folder come along.
+- A discography picks the folder with the most matching files, then the best quality. The per-search safety limit
+  of 50 files does not apply to it; it does apply to an album folder.
+- The mode is derived from the search text, not stored: editing the text changes it. The API returns it per item as
+  `searchMode` (`track`, `album` or `discography`) and `soulseekSearchText`; the Wishlist page shows an **Album** or
+  **Discography** badge with the real search text in its tooltip.
+- Discography and label-crate jobs create their wishlist items in album mode (`<artist> <title> album`); a release is
+  Completed once its album folder is queued.
+- A title that itself ends with "album" (`The White Album`) is read as album mode; add `album` once more to search
+  for the title itself (`Beatles The White Album album`).
 
 ## Unseen Results Badge
 
@@ -107,7 +132,7 @@ created it (the UI, the API, Lidarr, a browser extension):
 ```yaml
 wishlist:
   filter: ".flac OR .wav OR .alac OR .aiff OR .aif OR .m4a" # AND-ed with each item's own filter
-  max_downloads: 1 # one file per item, never a whole folder; empty = the item decides
+  max_downloads: 1 # one file per item, never a whole folder (except album/discography mode); empty = the item decides
 ```
 
 Environment variables: `WISHLIST_FILTER`, `WISHLIST_MAX_DOWNLOADS`.

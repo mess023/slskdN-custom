@@ -81,6 +81,26 @@ const getSearchLink = (item, searchId = item.lastSearchId) => {
   return `${urlBase}/searches/${encodeURIComponent(searchId)}${suffix}`;
 };
 
+// Album/discography mode comes from the last word of the search text (computed by the server).
+const SearchModeBadge = ({ item, size }) => {
+  if (item.searchMode !== 'album' && item.searchMode !== 'discography') return null;
+  const isAlbum = item.searchMode === 'album';
+  const tooltip = isAlbum
+    ? 'Album mode: the search ended with "album". Soulseek is searched for "{soulseekSearchText}". Downloads the complete best album folder (one user, one folder), audio files only (wishlist.filter). wishlist.max_downloads does not apply.'
+    : 'Discography mode: the search ended with "discography". Soulseek is searched for "{soulseekSearchText}". Downloads the complete best discography folder (one user, all subfolders), audio files only (wishlist.filter). wishlist.max_downloads does not apply.';
+  return (
+    <Popup
+      content={interfaceText(tooltip, { soulseekSearchText: item.soulseekSearchText })}
+      position="top center"
+      trigger={
+        <Label className="wishlist-search-mode" color="purple" size={size} style={{ marginLeft: '0.5em' }}>
+          <LocalizedText source={isAlbum ? 'Album' : 'Discography'} />
+        </Label>
+      }
+      {...interfaceTextProps(tooltip)}/>
+  );
+};
+
 const WishlistItemRow = ({
   item,
   onDelete,
@@ -182,6 +202,7 @@ const WishlistItemRow = ({
             style={{ marginRight: '0.5em' }}
           />
           <strong>{item.searchText}</strong>
+          <SearchModeBadge item={item} size="mini" />
           {item.filter && (
             <div className="wishlist-filter"><LocalizedText source={"Filter:"} />{" "}{item.filter}</div>
           )}
@@ -598,6 +619,7 @@ const WishlistItemCard = ({
                 name={item.enabled ? 'check circle' : 'circle outline'}
               />
               <strong style={{ fontSize: '1.1em' }}>{item.searchText}</strong>
+              <SearchModeBadge item={item} size="mini" />
               {item.filter && (
                 <Label basic color="blue" size="mini">
                   {item.filter}

@@ -5,6 +5,7 @@ namespace slskd.Wishlist
 {
     using System;
     using System.ComponentModel.DataAnnotations;
+    using System.ComponentModel.DataAnnotations.Schema;
 
     /// <summary>
     ///     A wishlist item representing a saved search.
@@ -155,5 +156,74 @@ namespace slskd.Wishlist
         ///     Gets or sets the date/time the user last viewed search results for this item.
         /// </summary>
         public DateTime? LastViewedAt { get; set; }
+
+        /// <summary>
+        ///     Gets the search mode derived from <see cref="SearchText"/>: "album" or "discography" when the text ends
+        ///     with that word after at least one other word, otherwise "track". Album and discography items download a
+        ///     complete folder; wishlist.max_downloads and <see cref="MaxDownloads"/> do not apply to them.
+        /// </summary>
+        [NotMapped]
+        public string SearchMode => ParseSearchText(SearchText).Mode;
+
+        /// <summary>
+        ///     Gets the text sent to Soulseek and matched against filenames: <see cref="SearchText"/> without a trailing
+        ///     "album"; a trailing "discography" stays (folder names usually contain it).
+        /// </summary>
+        [NotMapped]
+        public string SoulseekSearchText => ParseSearchText(SearchText).SoulseekText;
+
+        internal static (string Mode, string SoulseekText) ParseSearchText(string? searchText)
+        {
+            var text = (searchText ?? string.Empty).Trim();
+            var cut = text.Length - 1;
+            while (cut >= 0 && !char.IsWhiteSpace(text[cut]))
+            {
+                cut--;
+            }
+
+            var lastWord = TrimPunctuation(text[(cut + 1)..]);
+            var rest = text[..Math.Max(cut, 0)].TrimEnd();
+            while (rest.Length > 0 && (IsPunctuation(rest[^1]) || char.IsWhiteSpace(rest[^1])))
+            {
+                rest = rest[..^1];
+            }
+
+            // "-album" is an exclusion term, not a mode.
+            if (cut < 0 || rest.Length == 0 || text[cut + 1] == '-')
+            {
+                return ("track", text);
+            }
+
+            if (lastWord.Equals("album", StringComparison.OrdinalIgnoreCase))
+            {
+                return ("album", rest);
+            }
+
+            if (lastWord.Equals("discography", StringComparison.OrdinalIgnoreCase))
+            {
+                return ("discography", rest + " discography");
+            }
+
+            return ("track", text);
+
+            static bool IsPunctuation(char c) => char.IsPunctuation(c) || char.IsSymbol(c);
+
+            static string TrimPunctuation(string word)
+            {
+                var start = 0;
+                var end = word.Length;
+                while (start < end && IsPunctuation(word[start]))
+                {
+                    start++;
+                }
+
+                while (end > start && IsPunctuation(word[end - 1]))
+                {
+                    end--;
+                }
+
+                return word[start..end];
+            }
+        }
     }
 }

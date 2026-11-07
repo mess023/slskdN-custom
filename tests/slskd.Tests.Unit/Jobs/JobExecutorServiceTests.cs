@@ -89,12 +89,13 @@ public class JobExecutorServiceTests
 
         await CreateService().RunOnceAsync(CancellationToken.None);
 
-        Assert.Equal(new[] { "AC DC Back in Black", "Guns N Roses Appetite for Destruction" }, wishlistItems.Select(i => i.SearchText));
+        Assert.Equal(new[] { "AC DC Back in Black album", "Guns N Roses Appetite for Destruction album" }, wishlistItems.Select(i => i.SearchText));
         Assert.Equal(new[] { "job-1:rel-local", "job-1:rel-remote" }, wishlistItems.Select(i => i.JobId));
         Assert.All(wishlistItems, i =>
         {
             Assert.True(i.Enabled);
             Assert.True(i.AutoDownload);
+            Assert.Equal("album", i.SearchMode); // the complete best album folder, not wishlist.max_downloads files
             Assert.Equal(string.Empty, i.Filter); // wishlist.filter decides the formats
             Assert.Null(i.DestinationDirectory); // no target directory: the default download directory
         });
@@ -169,7 +170,7 @@ public class JobExecutorServiceTests
 
         await service.RunOnceAsync(CancellationToken.None);
 
-        Assert.Equal(new[] { "Weezer Weezer 1994", "Weezer Weezer 2001" }, wishlistItems.Select(i => i.SearchText));
+        Assert.Equal(new[] { "Weezer Weezer 1994 album", "Weezer Weezer 2001 album" }, wishlistItems.Select(i => i.SearchText));
         Assert.Equal(new[] { "job-3:rel-blue", "job-3:rel-green" }, wishlistItems.Select(i => i.JobId));
 
         wishlistItems[0].TotalDownloadCount = 9; // only the blue album was found
@@ -190,11 +191,11 @@ public class JobExecutorServiceTests
         var service = CreateService();
 
         await service.RunOnceAsync(CancellationToken.None);
-        Assert.Equal("Weezer Weezer", Assert.Single(wishlistItems).SearchText); // unique so far
+        Assert.Equal("Weezer Weezer album", Assert.Single(wishlistItems).SearchText); // unique so far
 
         await service.RunOnceAsync(CancellationToken.None);
 
-        Assert.Equal(new[] { "Weezer Weezer 1994", "Weezer Weezer 2001" }, wishlistItems.Select(i => i.SearchText));
+        Assert.Equal(new[] { "Weezer Weezer 1994 album", "Weezer Weezer 2001 album" }, wishlistItems.Select(i => i.SearchText));
         Assert.Equal(new[] { "job-12:rel-blue", "job-12:rel-green" }, wishlistItems.Select(i => i.JobId));
         wishlist.Verify(w => w.UpdateAsync(It.Is<WishlistItem>(i => i.JobId == "job-12:rel-blue")), Times.Once);
 
@@ -204,8 +205,8 @@ public class JobExecutorServiceTests
 
         await service.RunOnceAsync(CancellationToken.None);
 
-        Assert.Equal("Weezer Weezer 2009", wishlistItems.Last().SearchText);
-        Assert.Equal("Weezer Weezer 1994", wishlistItems[0].SearchText);
+        Assert.Equal("Weezer Weezer 2009 album", wishlistItems.Last().SearchText);
+        Assert.Equal("Weezer Weezer 1994 album", wishlistItems[0].SearchText);
         wishlist.Verify(w => w.UpdateAsync(It.IsAny<WishlistItem>()), Times.Once);
     }
 
